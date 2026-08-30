@@ -65,6 +65,7 @@ a { color: var(--blue); }
 .result-shell { align-items: flex-start; }
 .brand-logo, .result-logo { margin-bottom: 38px; }
 .logo-image { display: block; width: 220px; height: auto; object-fit: contain; }
+.brand-logo .logo-image, .result-logo .logo-image { mix-blend-mode: difference; }
 .result-logo .logo-image { width: 180px; }
 
 .eyebrow, .column-label, .section-number {
