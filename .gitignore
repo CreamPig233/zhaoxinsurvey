@@ -5,3 +5,4 @@ data/*.sqlite3-*
 logs/*
 *.log
 users.csv
+last_survey.csv
