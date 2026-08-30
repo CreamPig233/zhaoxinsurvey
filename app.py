@@ -5,6 +5,7 @@ import binascii
 import csv
 import hashlib
 import html
+import hmac
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -16,6 +17,7 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime, timedelta
+from http.client import HTTPConnection
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -32,6 +34,11 @@ CSV_PATH = BASE_DIR / "users.csv"
 DATABASE_PATH = BASE_DIR / "data" / "survey.sqlite3"
 LOG_PATH = BASE_DIR / "logs" / "app.log"
 CSV_HAS_HEADER = False
+USE_LOCAL_USERS_CSV = False
+REMOTE_USERS_CSV_SERVER = "45.125.44.183:10090"
+REMOTE_USERS_CSV_SHARED_SECRET = "REMOTE_USERS_CSV_SHARED_SECRET"
+REMOTE_AUTH_TIMEOUT_SECONDS = 5
+REMOTE_AUTH_CLOCK_SKEW_SECONDS = 30
 SESSION_TTL = timedelta(minutes=30)
 RATE_WINDOW_SECONDS = 60
 RATE_LIMIT = 20
@@ -218,6 +225,93 @@ def load_users() -> dict[str, tuple[str, str]]:
             if qq:
                 users[qq] = (student_id, name)
     return users
+
+
+def auth_signature(secret: str, method: str, path: str, timestamp: str, nonce: str, body: bytes, status: int | None = None) -> str:
+    status_part = str(status) if status is not None else "request"
+    material = "\n".join((status_part, method.upper(), path, timestamp, nonce, hashlib.sha256(body).hexdigest())).encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), material, hashlib.sha256).hexdigest()
+
+
+def verify_remote_user(qq: str, student_id: str) -> dict:
+    """Ask the remote CSV service without receiving the users.csv contents."""
+    if not REMOTE_USERS_CSV_SHARED_SECRET:
+        return {"error": "remote_auth_not_configured"}
+    try:
+        host, separator, port_text = REMOTE_USERS_CSV_SERVER.rpartition(":")
+        if not separator or not host or not port_text:
+            return {"error": "remote_auth_configuration_error"}
+        port = int(port_text)
+        if not 1 <= port <= 65535:
+            return {"error": "remote_auth_configuration_error"}
+
+        request_body = json.dumps(
+            {"qq": qq, "student_id": student_id},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        timestamp = str(int(time.time()))
+        nonce = secrets.token_urlsafe(24)
+        signature = auth_signature(REMOTE_USERS_CSV_SHARED_SECRET, "POST", "/verify", timestamp, nonce, request_body)
+        connection = HTTPConnection(host, port, timeout=REMOTE_AUTH_TIMEOUT_SECONDS)
+        try:
+            connection.request(
+                "POST",
+                "/verify",
+                body=request_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(request_body)),
+                    "X-Auth-Timestamp": timestamp,
+                    "X-Auth-Nonce": nonce,
+                    "X-Auth-Signature": signature,
+                },
+            )
+            response = connection.getresponse()
+            response_body = response.read(64 * 1024 + 1)
+            response_status = response.status
+            response_timestamp = response.getheader("X-Auth-Timestamp", "")
+            response_nonce = response.getheader("X-Auth-Nonce", "")
+            response_signature = response.getheader("X-Auth-Signature", "")
+        finally:
+            connection.close()
+
+        if len(response_body) > 64 * 1024 or not response_timestamp or response_nonce != nonce or not response_signature:
+            return {"error": "remote_auth_bad_response"}
+        try:
+            response_age = abs(int(time.time()) - int(response_timestamp))
+        except ValueError:
+            return {"error": "remote_auth_bad_response"}
+        if response_age > REMOTE_AUTH_CLOCK_SKEW_SECONDS:
+            return {"error": "remote_auth_bad_response"}
+        expected_signature = auth_signature(
+            REMOTE_USERS_CSV_SHARED_SECRET,
+            "POST",
+            "/verify",
+            response_timestamp,
+            response_nonce,
+            response_body,
+            response_status,
+        )
+        if not hmac.compare_digest(response_signature, expected_signature):
+            return {"error": "remote_auth_bad_response"}
+        if response_status != 200:
+            return {"error": "remote_auth_unavailable"}
+        payload = json.loads(response_body.decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            return {"error": "remote_auth_bad_response"}
+        reason = payload.get("reason")
+        if reason not in {"ok", "qq_not_found", "student_missing", "student_mismatch"}:
+            return {"error": "remote_auth_bad_response"}
+        return {
+            "known": bool(payload.get("known")),
+            "expected_student": str(payload.get("expected_student", ""))[:64],
+            "name": str(payload.get("name", ""))[:128],
+            "reason": reason,
+        }
+    except (ConnectionError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        return {"error": "remote_auth_unavailable"}
 
 
 def cleanup_state() -> None:
@@ -492,12 +586,22 @@ def _application(environ: dict, start_response):
             request = parse_body(environ)
             qq = str(request.get("qq", "")).strip()
             student_id = str(request.get("student_id", "")).strip()
-            users = load_users()
+            users = load_users() if USE_LOCAL_USERS_CSV else {}
+            remote_error = None
+            if not USE_LOCAL_USERS_CSV:
+                remote_result = verify_remote_user(qq, student_id)
+                remote_error = remote_result.get("error")
+                if not remote_error and remote_result.get("known"):
+                    users[qq] = (remote_result.get("expected_student", ""), remote_result.get("name", ""))
             if not qq or len(qq) > 32 or len(student_id) > 32:
                 reason = "invalid_input"
                 environ["login_reason"] = reason
                 log_login(environ, qq, student_id, None, "failure", reason)
                 status, headers, body = json_response({"ok": False, "error": "请输入有效的 QQ 号和学号。"}, 400)
+            elif remote_error:
+                environ["login_reason"] = remote_error
+                log_login(environ, qq, student_id, None, "failure", remote_error)
+                status, headers, body = json_response({"ok": False, "error": "身份验证服务暂时不可用，请稍后重试。"}, 503)
             elif qq not in users:
                 environ["login_reason"] = "qq_not_found"
                 log_login(environ, qq, student_id, None, "failure", "qq_not_found")

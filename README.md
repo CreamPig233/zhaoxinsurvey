@@ -65,6 +65,9 @@ python app.py
 | `CSV_PATH` | `users.csv` | 登录名单路径 |
 | `DATABASE_PATH` | `data/survey.sqlite3` | SQLite 数据库路径 |
 | `CSV_HAS_HEADER` | `False` | CSV 是否包含表头 |
+| `USE_LOCAL_USERS_CSV` | `True` | `True` 时读取本地 CSV；`False` 时向远端身份验证服务请求 |
+| `REMOTE_USERS_CSV_SERVER` | `127.0.0.1:25565` | 远端 `users_csv_server.py` 的地址 |
+| `USERS_CSV_SHARED_SECRET` | 环境变量 | app 与远端服务共享的 HMAC 密钥，远端模式必填 |
 | `SESSION_TTL` | 30 分钟 | 登录会话有效期 |
 | `RATE_LIMIT` | 每分钟 20 次 | 登录接口的 IP 限流值 |
 | `SUBMISSION_LIMIT` | 每分钟 3 次 | 提交接口的用户/IP 限流值 |
@@ -88,7 +91,19 @@ QQ号,学号,姓名
 - QQ 号不存在：提示“请加群后继续。”
 - QQ 号存在但学号为空：提示“请群内实名后继续。”
 - 学号与名单不完全一致：提示“学号与 QQ 号不匹配，请核对后重试。”
-- 每次登录都会重新读取 CSV，因此外部程序更新名单后无需重启服务。
+- 本地模式下每次登录都会重新读取 CSV，因此外部程序更新名单后无需重启服务。
+
+当 `USE_LOCAL_USERS_CSV = False` 时，app 不读取本地 `users.csv`，而是向
+`REMOTE_USERS_CSV_SERVER` 的 `/verify` 接口发送 QQ 号和学号。请求和响应均使用
+`USERS_CSV_SHARED_SECRET` 做 HMAC-SHA256 签名，并校验时间戳和随机数。远端服务只返回身份校验结果，不返回完整名单。
+
+启动远端身份验证服务：
+```powershell
+$env:USERS_CSV_SHARED_SECRET = "replace-with-a-long-random-secret"
+python users_csv_server.py --host 0.0.0.0 --port 25565
+```
+
+app 端也必须设置同一个 `USERS_CSV_SHARED_SECRET`。生产部署远端模式时，不要把 `users.csv` 放在 app 所在机器上；该文件只需要放在 `users_csv_server.py` 同目录。
 
 ## 数据库
 
