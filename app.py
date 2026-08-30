@@ -20,7 +20,7 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from threading import Lock
 from urllib.parse import parse_qs, urlparse
-from wsgiref.simple_server import make_server
+from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 
 # Deployment knobs. The deadline is intentionally easy to find and change.
@@ -68,6 +68,15 @@ def configure_logging() -> logging.Logger:
 LOGGER = configure_logging()
 
 
+class QuietWSGIRequestHandler(WSGIRequestHandler):
+    def log_message(self, format, *args):
+        status = str(args[1]) if len(args) > 1 else ""
+        request_path = urlparse(getattr(self, "path", "/")).path
+        if status in {"200", "302"} or (status == "404" and request_path == "/favicon.ico"):
+            return
+        super().log_message(format, *args)
+
+
 def now() -> datetime:
     return datetime.now()
 
@@ -109,6 +118,7 @@ def init_db() -> None:
                 departments_json TEXT NOT NULL,
                 transfer TEXT NOT NULL CHECK (transfer IN ('是', '否')),
                 strengths TEXT NOT NULL,
+                other_talents TEXT NOT NULL DEFAULT '',
                 submitted_at TEXT NOT NULL,
                 request_id TEXT NOT NULL,
                 content_hash TEXT NOT NULL
@@ -292,7 +302,8 @@ def normalized_submission(body: dict, session: dict) -> tuple[dict | None, str |
     gender = body.get("gender")
     transfer = body.get("transfer")
     departments = body.get("departments")
-    strengths = decode_strengths(body.get("strengths_b64"))
+    strengths = decode_strengths(body.get("strengths_b64", ""))
+    other_talents = decode_strengths(body.get("other_talents_b64", ""))
     if gender not in ("男", "女"):
         return None, "请选择性别。"
     if transfer not in ("是", "否"):
@@ -301,6 +312,8 @@ def normalized_submission(body: dict, session: dict) -> tuple[dict | None, str |
         return None, "请至少选择一个部门，并确认部门顺序有效。"
     if strengths is None:
         return None, "请填写个人优势及未来工作设想，内容不能超过 4000 字。"
+    if other_talents is None:
+        return None, "其它特长内容不能超过 4000 字。"
     return {
         "name": session["name"],
         "student_id": session["student_id"],
@@ -309,6 +322,7 @@ def normalized_submission(body: dict, session: dict) -> tuple[dict | None, str |
         "departments": departments,
         "transfer": transfer,
         "strengths": strengths,
+        "other_talents": other_talents,
     }, None
 
 
@@ -325,6 +339,7 @@ def public_submission(row: sqlite3.Row | None) -> dict | None:
         "departments": json.loads(row["departments_json"]),
         "transfer": row["transfer"],
         "strengths": row["strengths"],
+        "other_talents": row["other_talents"],
         "submitted_at": row["submitted_at"],
     }
 
@@ -360,14 +375,15 @@ def save_submission(record: dict, request_id: str):
             (request_id, record["student_id"], fingerprint, current_time),
         )
         conn.execute(
-            """INSERT INTO submissions(student_id, qq, name, gender, departments_json, transfer, strengths, submitted_at, request_id, content_hash)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO submissions(student_id, qq, name, gender, departments_json, transfer, strengths, other_talents, submitted_at, request_id, content_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(student_id) DO UPDATE SET qq=excluded.qq, name=excluded.name, gender=excluded.gender,
                departments_json=excluded.departments_json, transfer=excluded.transfer, strengths=excluded.strengths,
+               other_talents=excluded.other_talents,
                submitted_at=excluded.submitted_at, request_id=excluded.request_id, content_hash=excluded.content_hash""",
-            (record["student_id"], record["qq"], record["name"], record["gender"], json.dumps(record["departments"], ensure_ascii=False), record["transfer"], record["strengths"], submitted_at, request_id, fingerprint),
+            (record["student_id"], record["qq"], record["name"], record["gender"], json.dumps(record["departments"], ensure_ascii=False), record["transfer"], record["strengths"], record["other_talents"], submitted_at, request_id, fingerprint),
         )
-        after = {key: record[key] for key in ("gender", "departments", "transfer", "strengths")}
+        after = {key: record[key] for key in ("gender", "departments", "transfer", "strengths", "other_talents")}
         conn.execute(
             "INSERT INTO change_logs(student_id, operator, changed_at, before_json, after_json) VALUES (?, ?, ?, ?, ?)",
             (record["student_id"], record["student_id"], submitted_at, json.dumps(before, ensure_ascii=False) if before else None, json.dumps(after, ensure_ascii=False)),
@@ -506,16 +522,18 @@ def application(environ: dict, start_response):
         response_started = True
         elapsed_ms = (time.perf_counter() - started_at) * 1000
         safe_ua = environ.get("HTTP_USER_AGENT", "").replace("\r", " ").replace("\n", " ")[:200]
-        LOGGER.info(
-            "request_id=%s method=%s path=%s status=%s duration_ms=%.1f ip=%s user_agent=%s",
-            request_id,
-            method,
-            path,
-            status.split(" ", 1)[0],
-            elapsed_ms,
-            client_ip(environ),
-            safe_ua,
-        )
+        status_code = status.split(" ", 1)[0]
+        if status_code not in {"200", "302"} and not (status_code == "404" and path == "/favicon.ico"):
+            LOGGER.info(
+                "request_id=%s method=%s path=%s status=%s duration_ms=%.1f ip=%s user_agent=%s",
+                request_id,
+                method,
+                path,
+                status_code,
+                elapsed_ms,
+                client_ip(environ),
+                safe_ua,
+            )
         response_headers = list(headers)
         response_headers.append(("X-Request-ID", request_id))
         if exc_info is None:
@@ -551,6 +569,6 @@ def application(environ: dict, start_response):
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("SURVEY_PORT", "8000"))
-    with make_server("0.0.0.0", port, application) as server:
+    with make_server("0.0.0.0", port, application, handler_class=QuietWSGIRequestHandler) as server:
         LOGGER.info("server_started address=http://127.0.0.1:%s deadline=%s database=%s log=%s", port, DEADLINE.isoformat(sep=" "), DATABASE_PATH, LOG_PATH)
         server.serve_forever()

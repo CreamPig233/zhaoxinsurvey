@@ -46,6 +46,10 @@
         <div class="section-heading"><span class="section-number">05</span><div><h2>个人优势及未来工作设想</h2><p>简单介绍自己，以及你希望在网络中心参与的工作。</p></div></div>
         <label class="textarea-label">个人优势及未来工作设想 <span class="optional">选填</span><textarea id="strengths" maxlength="4000" placeholder="说说你的优势，以及你希望在网络中心做些什么……"></textarea><span class="character-count"><span id="char-count">0</span> / 4000</span></label>
       </section>
+      <section class="form-section">
+        <div class="section-heading"><span class="section-number">06</span><div><h2>关于“特殊人才引进计划”</h2><p>为了寻访先锋急需的各类特殊技能人才，本次招新特设置该环节。可以在这里谈谈你的特长或者爱好，什么都行。<br>如果你正是我们急需的特殊人才，面试前会有专人进行对接<br>（包括但不限于：板绘，平面设计，Live2D，同人创作，哪怕只是PDD叠券也可以写）</p></div></div>
+        <label class="textarea-label">特殊技能或爱好 <span class="optional">选填</span><textarea id="other-talents" maxlength="4000" placeholder="如果真有会PDD叠券的一定要写……"></textarea><span class="character-count"><span id="other-char-count">0</span> / 4000</span></label>
+      </section>
       <div class="submit-row"><p id="form-error" class="form-error" role="alert"></p><button id="submit-button" class="pill-button filled" type="submit">预览并提交 <span aria-hidden="true">→</span></button></div>
     </form>
   </main>
@@ -59,6 +63,7 @@
     const selectedEl = document.querySelector('#selected');
     const form = document.querySelector('#survey-form');
     const dialog = document.querySelector('#confirm-dialog');
+    const otherTalentsEl = document.querySelector('#other-talents');
     function logClientError(message, details = {}) {
       console.error(`[survey] ${message}`, { ...details, online: navigator.onLine, time: new Date().toISOString() });
     }
@@ -112,24 +117,26 @@
       return card;
     }
     document.querySelector('#strengths').addEventListener('input', event => document.querySelector('#char-count').textContent = event.target.value.length);
+    otherTalentsEl.addEventListener('input', event => document.querySelector('#other-char-count').textContent = event.target.value.length);
     function setError(message) { document.querySelector('#form-error').textContent = message || ''; }
     function valueOf(name) { return form.querySelector(`input[name="${name}"]:checked`)?.value || ''; }
     function review() {
-      const gender = valueOf('gender'), transfer = valueOf('transfer'), strengths = document.querySelector('#strengths').value.trim();
+      const gender = valueOf('gender'), transfer = valueOf('transfer'), strengths = document.querySelector('#strengths').value.trim(), otherTalents = otherTalentsEl.value.trim();
       if (!gender) return setError('请选择性别。'); if (!selected.length) return setError('请至少选择一个报名部门。'); if (!transfer) return setError('请选择是否服从部门间调剂。');
       setError(''); pendingRequestId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      document.querySelector('#review-content').innerHTML = `<dl><dt>姓名</dt><dd>${escapeHTML(document.querySelector('#name').value)}</dd><dt>部门志愿</dt><dd><ol>${selected.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ol></dd><dt>服从调剂</dt><dd>${escapeHTML(transfer)}</dd><dt>个人优势及未来工作设想</dt><dd class="review-long">${escapeHTML(strengths)}</dd></dl>`;
+      document.querySelector('#review-content').innerHTML = `<dl><dt>姓名</dt><dd>${escapeHTML(document.querySelector('#name').value)}</dd><dt>部门志愿</dt><dd><ol>${selected.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ol></dd><dt>服从调剂</dt><dd>${escapeHTML(transfer)}</dd><dt>个人优势及未来工作设想</dt><dd class="review-long">${escapeHTML(strengths)}</dd><dt>其它特长</dt><dd class="review-long">${escapeHTML(otherTalents)}</dd></dl>`;
       dialog.showModal();
     }
     form.addEventListener('submit', event => { event.preventDefault(); review(); });
     ['#close-dialog', '#cancel-dialog'].forEach(selector => document.querySelector(selector).addEventListener('click', () => dialog.close()));
     document.querySelector('#confirm-submit').addEventListener('click', async () => {
       const button = document.querySelector('#confirm-submit'); button.disabled = true;
-      const body = {gender: valueOf('gender'), departments: selected, transfer: valueOf('transfer'), strengths_b64: btoa(unescape(encodeURIComponent(document.querySelector('#strengths').value.trim()))), request_id: pendingRequestId};
+      const encodeBase64 = value => btoa(unescape(encodeURIComponent(value)));
+      const body = {gender: valueOf('gender'), departments: selected, transfer: valueOf('transfer'), strengths_b64: encodeBase64(document.querySelector('#strengths').value.trim()), other_talents_b64: encodeBase64(otherTalentsEl.value.trim()), request_id: pendingRequestId};
       try { const {data} = await apiJSON('/api/submit', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf}, body: JSON.stringify(body)}); if (!data.ok) throw new Error(data.error); location.href = '/success.html'; } catch (error) { logClientError('提交流程失败', {error}); button.disabled = false; dialog.close(); setError(error.message || '提交失败，请稍后重试。'); }
     });
     document.querySelector('#logout').addEventListener('click', async () => { try { await apiJSON('/api/logout', {method: 'POST', headers: {'X-CSRF-Token': csrf}}); } catch (error) { logClientError('退出流程失败', {error}); } location.href = '/login'; });
-    async function load() { try { const {response, data} = await apiJSON('/api/me'); if (!response.ok) return location.href = '/login'; csrf = data.csrf; document.querySelector('#name').value = data.name; document.querySelector('#student-id').value = data.student_id; document.querySelector('#qq').value = data.qq; document.querySelector('#header-name').textContent = data.name; if (data.submission) { document.querySelector(`input[name="gender"][value="${data.submission.gender}"]`).checked = true; document.querySelector(`input[name="transfer"][value="${data.submission.transfer}"]`).checked = true; selected = data.submission.departments; document.querySelector('#strengths').value = data.submission.strengths; document.querySelector('#char-count').textContent = data.submission.strengths.length; } renderDepartments(); } catch (error) { logClientError('加载问卷流程失败', {error}); location.href = '/login'; } }
+    async function load() { try { const {response, data} = await apiJSON('/api/me'); if (!response.ok) return location.href = '/login'; csrf = data.csrf; document.querySelector('#name').value = data.name; document.querySelector('#student-id').value = data.student_id; document.querySelector('#qq').value = data.qq; document.querySelector('#header-name').textContent = data.name; if (data.submission) { document.querySelector(`input[name="gender"][value="${data.submission.gender}"]`).checked = true; document.querySelector(`input[name="transfer"][value="${data.submission.transfer}"]`).checked = true; selected = data.submission.departments; document.querySelector('#strengths').value = data.submission.strengths; document.querySelector('#char-count').textContent = data.submission.strengths.length; otherTalentsEl.value = data.submission.other_talents || ''; document.querySelector('#other-char-count').textContent = otherTalentsEl.value.length; } renderDepartments(); } catch (error) { logClientError('加载问卷流程失败', {error}); location.href = '/login'; } }
     load();
   </script>
 </body>

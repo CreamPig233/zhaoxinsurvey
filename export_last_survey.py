@@ -23,6 +23,7 @@ HEADERS = [
     "部门志愿5",
     "是否服从调剂",
     "个人简介",
+    "其它特长",
     "填写时间",
 ]
 
@@ -51,7 +52,7 @@ def submission_rows(connection: sqlite3.Connection):
 
     return connection.execute(
         f"""
-        SELECT qq, name, gender, departments_json, transfer, strengths, student_id,
+        SELECT qq, name, gender, departments_json, transfer, strengths, other_talents, student_id,
                {submitted_at_expression} AS submitted_at
         FROM submissions
         ORDER BY {order_by}
@@ -86,6 +87,7 @@ def export_submissions(database: Path, output: Path) -> int:
                     *department_columns,
                     row["transfer"],
                     row["strengths"],
+                    row["other_talents"],
                     row["submitted_at"] or "",
                 ]
             )
