@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · 先锋网络中心</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="dark-page">
+  <main class="login-shell">
+    <div class="brand-logo"><img class="logo-image" src="/static/logo.png" alt="先锋网络中心"></div>
+    <p class="eyebrow">PIONEER NETWORK CENTER / 2026</p>
+    <h1>先锋网络中心<br><span>2026 招新报名</span></h1>
+    <p class="lead">输入群内登记的身份信息，开始填写报名表。</p>
+    <form id="login-form" class="login-form" novalidate>
+      <label>QQ 号<input name="qq" inputmode="numeric" autocomplete="off" maxlength="32" required placeholder="请输入 QQ 号"></label>
+      <label>学号<input name="student_id" inputmode="text" autocomplete="off" maxlength="32" required placeholder="请输入学号"></label>
+      <p id="login-error" class="form-error" role="alert"></p>
+      <button class="pill-button filled" type="submit">进入报名表 <span aria-hidden="true">→</span></button>
+    </form>
+  </main>
+  <script>
+    const form = document.querySelector('#login-form');
+    const error = document.querySelector('#login-error');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      error.textContent = '';
+      const button = form.querySelector('button');
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(Object.fromEntries(new FormData(form)))
+        });
+        const data = await response.json();
+        if (!data.ok) throw new Error(data.error || '登录失败，请稍后重试。');
+        location.href = '/questionnaire';
+      } catch (err) {
+        error.textContent = err.message;
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
