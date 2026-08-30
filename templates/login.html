@@ -14,7 +14,7 @@
     <p class="lead">输入群内登记的身份信息，开始填写报名表。</p>
     <form id="login-form" class="login-form" novalidate>
       <label>QQ 号<input name="qq" inputmode="numeric" autocomplete="off" maxlength="32" required placeholder="请输入 QQ 号"></label>
-      <label>学号<input name="student_id" inputmode="text" autocomplete="off" maxlength="32" required placeholder="请输入学号"></label>
+      <label>学号<input name="student_id" inputmode="numeric" autocomplete="off" maxlength="32" required placeholder="请输入学号"></label>
       <p id="login-error" class="form-error" role="alert"></p>
       <button class="pill-button filled" type="submit">进入报名表 <span aria-hidden="true">→</span></button>
     </form>
@@ -22,6 +22,28 @@
   <script>
     const form = document.querySelector('#login-form');
     const error = document.querySelector('#login-error');
+    const qqInput = form.querySelector('input[name="qq"]');
+    const studentIdInput = form.querySelector('input[name="student_id"]');
+    const loginCacheKey = 'zhaoxinsurvey.login.identity.v1';
+    function loadLoginIdentity() {
+      try {
+        const cached = JSON.parse(localStorage.getItem(loginCacheKey) || 'null');
+        if (cached && typeof cached.qq === 'string' && typeof cached.student_id === 'string' && cached.qq.length <= 32 && cached.student_id.length <= 32) {
+          qqInput.value = cached.qq;
+          studentIdInput.value = cached.student_id;
+        }
+      } catch (storageError) {
+        // Private browsing or blocked storage should not prevent login.
+        logClientError('读取登录本地缓存失败', {error: storageError});
+      }
+    }
+    function saveLoginIdentity(identity) {
+      try {
+        localStorage.setItem(loginCacheKey, JSON.stringify({qq: identity.qq, student_id: identity.student_id}));
+      } catch (storageError) {
+        logClientError('保存登录本地缓存失败', {error: storageError});
+      }
+    }
     function logClientError(message, details = {}) {
       console.error(`[survey] ${message}`, { ...details, online: navigator.onLine, time: new Date().toISOString() });
     }
@@ -62,6 +84,7 @@
           body: JSON.stringify(Object.fromEntries(new FormData(form)))
         });
         if (!data.ok) throw new Error(data.error || '登录失败，请稍后重试。');
+        saveLoginIdentity(data);
         location.href = '/questionnaire';
       } catch (err) {
         logClientError('登录流程失败', {error: err});
@@ -69,6 +92,7 @@
         button.disabled = false;
       }
     });
+    loadLoginIdentity();
   </script>
 </body>
 </html>
