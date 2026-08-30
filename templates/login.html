@@ -22,21 +22,49 @@
   <script>
     const form = document.querySelector('#login-form');
     const error = document.querySelector('#login-error');
+    function logClientError(message, details = {}) {
+      console.error(`[survey] ${message}`, { ...details, online: navigator.onLine, time: new Date().toISOString() });
+    }
+    async function apiJSON(url, options = {}) {
+      const startedAt = performance.now();
+      let response;
+      try {
+        response = await fetch(url, options);
+      } catch (requestError) {
+        logClientError('fetch 网络错误', {url, method: options.method || 'GET', duration_ms: Math.round(performance.now() - startedAt), error: requestError});
+        throw requestError;
+      }
+      const requestId = response.headers.get('X-Request-ID') || '';
+      const raw = await response.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (parseError) {
+        logClientError('接口返回非 JSON', {url, method: options.method || 'GET', status: response.status, request_id: requestId, response_preview: raw.slice(0, 500), error: parseError});
+        throw new Error(`服务器响应格式错误（HTTP ${response.status}，请求编号 ${requestId || '未知'}）`);
+      }
+      if (!response.ok || data.ok === false) {
+        logClientError('接口请求失败', {url, method: options.method || 'GET', status: response.status, request_id: requestId, response: data});
+      }
+      return {response, data, requestId};
+    }
+    window.addEventListener('error', event => logClientError('页面脚本异常', {message: event.message, filename: event.filename, line: event.lineno, column: event.colno, error: event.error}));
+    window.addEventListener('unhandledrejection', event => logClientError('未处理的 Promise 异常', {reason: event.reason}));
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       error.textContent = '';
       const button = form.querySelector('button');
       button.disabled = true;
       try {
-        const response = await fetch('/api/login', {
+        const {data} = await apiJSON('/api/login', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(Object.fromEntries(new FormData(form)))
         });
-        const data = await response.json();
         if (!data.ok) throw new Error(data.error || '登录失败，请稍后重试。');
         location.href = '/questionnaire';
       } catch (err) {
+        logClientError('登录流程失败', {error: err});
         error.textContent = err.message;
         button.disabled = false;
       }

@@ -182,6 +182,22 @@ python export_last_survey.py `
 - 登录和提交接口具备 IP/用户维度的频率限制。
 - `users.csv` 只读，名单更新由外部程序负责。
 
+## 故障排查日志
+
+服务启动后会自动创建 `logs/app.log`，日志文件达到 5 MB 后自动轮转，最多保留 5 个历史文件。日志同时输出到服务进程的控制台。
+
+每个请求都会记录以下信息：
+
+- 请求编号 `request_id`
+- 请求方法和路径
+- HTTP 状态码
+- 请求耗时
+- 客户端 IP 和 User-Agent
+
+服务端未捕获异常会记录完整 traceback。接口响应也会带有同一个 `X-Request-ID` 响应头，便于将浏览器错误与服务端日志对应起来。
+
+浏览器端发生网络错误、非 JSON 响应、接口返回非 2xx 状态或页面脚本异常时，会通过 `console.error` 记录详细信息。排查“Failed to fetch”时，可打开浏览器开发者工具的 Console 和 Network 面板，同时查看 `logs/app.log` 中相同 `request_id` 的记录。
+
 ## 本地检查
 
 检查 Python 语法：

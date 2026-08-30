@@ -59,6 +59,34 @@
     const selectedEl = document.querySelector('#selected');
     const form = document.querySelector('#survey-form');
     const dialog = document.querySelector('#confirm-dialog');
+    function logClientError(message, details = {}) {
+      console.error(`[survey] ${message}`, { ...details, online: navigator.onLine, time: new Date().toISOString() });
+    }
+    async function apiJSON(url, options = {}) {
+      const startedAt = performance.now();
+      let response;
+      try {
+        response = await fetch(url, options);
+      } catch (requestError) {
+        logClientError('fetch 网络错误', {url, method: options.method || 'GET', duration_ms: Math.round(performance.now() - startedAt), error: requestError});
+        throw requestError;
+      }
+      const requestId = response.headers.get('X-Request-ID') || '';
+      const raw = await response.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (parseError) {
+        logClientError('接口返回非 JSON', {url, method: options.method || 'GET', status: response.status, request_id: requestId, response_preview: raw.slice(0, 500), error: parseError});
+        throw new Error(`服务器响应格式错误（HTTP ${response.status}，请求编号 ${requestId || '未知'}）`);
+      }
+      if (!response.ok || data.ok === false) {
+        logClientError('接口请求失败', {url, method: options.method || 'GET', status: response.status, request_id: requestId, response: data});
+      }
+      return {response, data, requestId};
+    }
+    window.addEventListener('error', event => logClientError('页面脚本异常', {message: event.message, filename: event.filename, line: event.lineno, column: event.colno, error: event.error}));
+    window.addEventListener('unhandledrejection', event => logClientError('未处理的 Promise 异常', {reason: event.reason}));
     const escapeHTML = (text) => { const node = document.createElement('span'); node.textContent = text; return node.innerHTML; };
     const shortNumber = (number) => String(number).padStart(2, '0');
     function renderDepartments() {
@@ -98,10 +126,10 @@
     document.querySelector('#confirm-submit').addEventListener('click', async () => {
       const button = document.querySelector('#confirm-submit'); button.disabled = true;
       const body = {gender: valueOf('gender'), departments: selected, transfer: valueOf('transfer'), strengths_b64: btoa(unescape(encodeURIComponent(document.querySelector('#strengths').value.trim()))), request_id: pendingRequestId};
-      try { const response = await fetch('/api/submit', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf}, body: JSON.stringify(body)}); const data = await response.json(); if (!data.ok) throw new Error(data.error); location.href = '/success.html'; } catch (error) { button.disabled = false; dialog.close(); setError(error.message || '提交失败，请稍后重试。'); }
+      try { const {data} = await apiJSON('/api/submit', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf}, body: JSON.stringify(body)}); if (!data.ok) throw new Error(data.error); location.href = '/success.html'; } catch (error) { logClientError('提交流程失败', {error}); button.disabled = false; dialog.close(); setError(error.message || '提交失败，请稍后重试。'); }
     });
-    document.querySelector('#logout').addEventListener('click', async () => { await fetch('/api/logout', {method: 'POST', headers: {'X-CSRF-Token': csrf}}); location.href = '/login'; });
-    async function load() { const response = await fetch('/api/me'); if (!response.ok) return location.href = '/login'; const data = await response.json(); csrf = data.csrf; document.querySelector('#name').value = data.name; document.querySelector('#student-id').value = data.student_id; document.querySelector('#qq').value = data.qq; document.querySelector('#header-name').textContent = data.name; if (data.submission) { document.querySelector(`input[name="gender"][value="${data.submission.gender}"]`).checked = true; document.querySelector(`input[name="transfer"][value="${data.submission.transfer}"]`).checked = true; selected = data.submission.departments; document.querySelector('#strengths').value = data.submission.strengths; document.querySelector('#char-count').textContent = data.submission.strengths.length; } renderDepartments(); }
+    document.querySelector('#logout').addEventListener('click', async () => { try { await apiJSON('/api/logout', {method: 'POST', headers: {'X-CSRF-Token': csrf}}); } catch (error) { logClientError('退出流程失败', {error}); } location.href = '/login'; });
+    async function load() { try { const {response, data} = await apiJSON('/api/me'); if (!response.ok) return location.href = '/login'; csrf = data.csrf; document.querySelector('#name').value = data.name; document.querySelector('#student-id').value = data.student_id; document.querySelector('#qq').value = data.qq; document.querySelector('#header-name').textContent = data.name; if (data.submission) { document.querySelector(`input[name="gender"][value="${data.submission.gender}"]`).checked = true; document.querySelector(`input[name="transfer"][value="${data.submission.transfer}"]`).checked = true; selected = data.submission.departments; document.querySelector('#strengths').value = data.submission.strengths; document.querySelector('#char-count').textContent = data.submission.strengths.length; } renderDepartments(); } catch (error) { logClientError('加载问卷流程失败', {error}); location.href = '/login'; } }
     load();
   </script>
 </body>

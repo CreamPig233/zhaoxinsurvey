@@ -6,6 +6,8 @@ import csv
 import hashlib
 import html
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import mimetypes
 import os
 import secrets
@@ -26,6 +28,7 @@ DEADLINE = datetime(2026, 9, 29, 12, 0, 0)
 BASE_DIR = Path(__file__).resolve().parent
 CSV_PATH = BASE_DIR / "users.csv"
 DATABASE_PATH = BASE_DIR / "data" / "survey.sqlite3"
+LOG_PATH = BASE_DIR / "logs" / "app.log"
 CSV_HAS_HEADER = False
 SESSION_TTL = timedelta(minutes=30)
 RATE_WINDOW_SECONDS = 60
@@ -44,6 +47,25 @@ DEPARTMENTS = [
 SESSIONS: dict[str, dict] = {}
 RATE_BUCKETS: dict[str, list[float]] = {}
 STATE_LOCK = Lock()
+
+
+def configure_logging() -> logging.Logger:
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("survey")
+    if logger.handlers:
+        return logger
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    file_handler = RotatingFileHandler(LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    return logger
+
+
+LOGGER = configure_logging()
 
 
 def now() -> datetime:
@@ -353,7 +375,7 @@ def save_submission(record: dict, request_id: str):
     return submitted_at, None, 200
 
 
-def application(environ: dict, start_response):
+def _application(environ: dict, start_response):
     cleanup_state()
     method = environ.get("REQUEST_METHOD", "GET").upper()
     path = urlparse(environ.get("PATH_INFO", "/")).path
@@ -396,12 +418,12 @@ def application(environ: dict, start_response):
                 status, headers, body = json_response({"ok": False, "error": "请输入有效的 QQ 号和学号。"}, 400)
             elif qq not in users:
                 log_login(environ, qq, student_id, None, "failure", "qq_not_found")
-                status, headers, body = json_response({"ok": False, "error": "请加群后继续。"}, 403)
+                status, headers, body = json_response({"ok": False, "error": "请加入招新 QQ 群 810192062 后继续。"}, 403)
             else:
                 expected_student, name = users[qq]
                 if not expected_student:
                     log_login(environ, qq, student_id, name, "failure", "student_missing")
-                    status, headers, body = json_response({"ok": False, "error": "请群内实名后继续。"}, 403)
+                    status, headers, body = json_response({"ok": False, "error": "请在招新群内实名后继续，实名方法请看置顶群公告。"}, 403)
                 elif student_id != expected_student:
                     log_login(environ, qq, student_id, name, "failure", "student_mismatch")
                     status, headers, body = json_response({"ok": False, "error": "学号与 QQ 号不匹配，请核对后重试。"}, 403)
@@ -472,9 +494,63 @@ def application(environ: dict, start_response):
     return [body]
 
 
+def application(environ: dict, start_response):
+    request_id = uuid.uuid4().hex[:16]
+    method = environ.get("REQUEST_METHOD", "GET").upper()
+    path = urlparse(environ.get("PATH_INFO", "/")).path
+    started_at = time.perf_counter()
+    response_started = False
+
+    def logged_start_response(status, headers, exc_info=None):
+        nonlocal response_started
+        response_started = True
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        safe_ua = environ.get("HTTP_USER_AGENT", "").replace("\r", " ").replace("\n", " ")[:200]
+        LOGGER.info(
+            "request_id=%s method=%s path=%s status=%s duration_ms=%.1f ip=%s user_agent=%s",
+            request_id,
+            method,
+            path,
+            status.split(" ", 1)[0],
+            elapsed_ms,
+            client_ip(environ),
+            safe_ua,
+        )
+        response_headers = list(headers)
+        response_headers.append(("X-Request-ID", request_id))
+        if exc_info is None:
+            return start_response(status, response_headers)
+        return start_response(status, response_headers, exc_info)
+
+    try:
+        return _application(environ, logged_start_response)
+    except Exception:
+        LOGGER.exception(
+            "unhandled_exception request_id=%s method=%s path=%s ip=%s",
+            request_id,
+            method,
+            path,
+            client_ip(environ),
+        )
+        if response_started:
+            raise
+        if path.startswith("/api/"):
+            status, headers, body = json_response(
+                {"ok": False, "error": "服务器内部错误，请稍后重试。", "request_id": request_id},
+                500,
+            )
+        else:
+            status, headers, body = html_response(
+                "<h1>服务器内部错误</h1><p>请稍后重试。错误编号：" + html.escape(request_id) + "</p>",
+                500,
+            )
+        logged_start_response(f"{status} {HTTPStatus(status).phrase}", headers)
+        return [body]
+
+
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("SURVEY_PORT", "8000"))
     with make_server("0.0.0.0", port, application) as server:
-        print(f"先锋网络中心2026招新报名系统: http://127.0.0.1:{port}")
+        LOGGER.info("server_started address=http://127.0.0.1:%s deadline=%s database=%s log=%s", port, DEADLINE.isoformat(sep=" "), DATABASE_PATH, LOG_PATH)
         server.serve_forever()
