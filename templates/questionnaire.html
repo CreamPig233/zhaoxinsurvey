@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>报名表 · 先锋网络中心</title>
+  <link rel="icon" href="/favicon.ico" type="image/png">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body class="dark-page">
@@ -69,12 +70,19 @@
     }
     async function apiJSON(url, options = {}) {
       const startedAt = performance.now();
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 15000);
+      const requestOptions = {...options, credentials: 'same-origin', signal: controller.signal};
       let response;
       try {
-        response = await fetch(url, options);
+        response = await fetch(url, requestOptions);
       } catch (requestError) {
-        logClientError('fetch 网络错误', {url, method: options.method || 'GET', duration_ms: Math.round(performance.now() - startedAt), error: requestError});
-        throw requestError;
+        const errorType = requestError?.name === 'AbortError' ? 'timeout' : 'network_unreachable';
+        logClientError('fetch 网络错误', {url, method: options.method || 'GET', phase: 'connect_or_receive', duration_ms: Math.round(performance.now() - startedAt), error_name: requestError?.name, error_message: requestError?.message, error_type: errorType, page_url: location.href, protocol: location.protocol});
+        if (errorType === 'timeout') throw new Error('服务响应超时，请确认报名服务正在运行。');
+        throw new Error('无法连接报名服务，请确认服务已启动后重试。');
+      } finally {
+        window.clearTimeout(timeout);
       }
       const requestId = response.headers.get('X-Request-ID') || '';
       const raw = await response.text();
@@ -82,7 +90,7 @@
       try {
         data = JSON.parse(raw);
       } catch (parseError) {
-        logClientError('接口返回非 JSON', {url, method: options.method || 'GET', status: response.status, request_id: requestId, response_preview: raw.slice(0, 500), error: parseError});
+        logClientError('接口返回非 JSON', {url, method: options.method || 'GET', phase: 'parse_response', status: response.status, request_id: requestId, response_preview: raw.slice(0, 500), error_name: parseError?.name, error_message: parseError?.message});
         throw new Error(`服务器响应格式错误（HTTP ${response.status}，请求编号 ${requestId || '未知'}）`);
       }
       if (!response.ok || data.ok === false) {

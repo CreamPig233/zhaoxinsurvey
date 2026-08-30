@@ -11,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 import mimetypes
 import os
 import secrets
+import socket
 import sqlite3
 import time
 import uuid
@@ -18,9 +19,10 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from pathlib import Path
-from threading import Lock
+from socketserver import ThreadingMixIn
+from threading import BoundedSemaphore, Lock
 from urllib.parse import parse_qs, urlparse
-from wsgiref.simple_server import WSGIRequestHandler, make_server
+from wsgiref.simple_server import WSGIRequestHandler, WSGIServer
 
 
 # Deployment knobs. The deadline is intentionally easy to find and change.
@@ -36,6 +38,8 @@ RATE_LIMIT = 20
 REPEAT_WINDOW_SECONDS = 10
 SUBMISSION_WINDOW_SECONDS = 60
 SUBMISSION_LIMIT = 3
+REQUEST_TIMEOUT_SECONDS = 30
+MAX_REQUEST_THREADS = 32
 
 DEPARTMENTS = [
     "设备服务站 - 硬件部",
@@ -69,12 +73,53 @@ LOGGER = configure_logging()
 
 
 class QuietWSGIRequestHandler(WSGIRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
+
+    def handle(self):
+        try:
+            super().handle()
+        except socket.timeout:
+            LOGGER.warning("request_timeout peer=%s", self.client_address[0])
+        except (ConnectionError, OSError) as error:
+            LOGGER.warning("request_connection_error peer=%s error=%s", self.client_address[0], error)
+
     def log_message(self, format, *args):
         status = str(args[1]) if len(args) > 1 else ""
         request_path = urlparse(getattr(self, "path", "/")).path
         if status in {"200", "302"} or (status == "404" and request_path == "/favicon.ico"):
             return
         super().log_message(format, *args)
+
+
+class StableWSGIServer(ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+    block_on_close = False
+    allow_reuse_address = True
+    request_queue_size = 128
+
+    def __init__(self, server_address, application, handler_class):
+        super().__init__(server_address, handler_class)
+        self.set_app(application)
+        self._request_slots = BoundedSemaphore(MAX_REQUEST_THREADS)
+
+    def process_request(self, request, client_address):
+        if not self._request_slots.acquire(blocking=False):
+            LOGGER.warning("request_rejected peer=%s reason=server_busy", client_address[0])
+            request.close()
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 def now() -> datetime:
@@ -100,9 +145,10 @@ def user_agent(environ: dict) -> str:
 
 def db_connect() -> sqlite3.Connection:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
@@ -396,6 +442,24 @@ def _application(environ: dict, start_response):
     method = environ.get("REQUEST_METHOD", "GET").upper()
     path = urlparse(environ.get("PATH_INFO", "/")).path
 
+    if path == "/health" and method == "GET":
+        status, headers, body = json_response({"ok": True, "service": "zhaoxinsurvey"})
+        start_response("200 OK", headers)
+        return [body]
+
+    if path == "/favicon.ico" and method == "GET":
+        favicon = BASE_DIR / "static" / "logo.png"
+        body = favicon.read_bytes()
+        start_response(
+            "200 OK",
+            [
+                ("Content-Type", "image/png"),
+                ("Content-Length", str(len(body))),
+                ("Cache-Control", "public, max-age=86400"),
+            ],
+        )
+        return [body]
+
     if path.startswith("/static/"):
         relative = path.removeprefix("/static/")
         static_file = (BASE_DIR / "static" / relative).resolve()
@@ -422,6 +486,7 @@ def _application(environ: dict, start_response):
         status, headers, body = html_response(render_page("login.html"))
     elif path == "/api/login" and method == "POST":
         if rate_limited(f"login:{client_ip(environ)}"):
+            environ["login_reason"] = "rate_limited"
             status, headers, body = json_response({"ok": False, "error": "请求过于频繁，请稍后再试。"}, 429)
         else:
             request = parse_body(environ)
@@ -430,20 +495,25 @@ def _application(environ: dict, start_response):
             users = load_users()
             if not qq or len(qq) > 32 or len(student_id) > 32:
                 reason = "invalid_input"
+                environ["login_reason"] = reason
                 log_login(environ, qq, student_id, None, "failure", reason)
                 status, headers, body = json_response({"ok": False, "error": "请输入有效的 QQ 号和学号。"}, 400)
             elif qq not in users:
+                environ["login_reason"] = "qq_not_found"
                 log_login(environ, qq, student_id, None, "failure", "qq_not_found")
                 status, headers, body = json_response({"ok": False, "error": "请加入招新 QQ 群 810192062 后继续。"}, 403)
             else:
                 expected_student, name = users[qq]
                 if not expected_student:
+                    environ["login_reason"] = "student_missing"
                     log_login(environ, qq, student_id, name, "failure", "student_missing")
                     status, headers, body = json_response({"ok": False, "error": "请在招新群内实名后继续，实名方法请看置顶群公告。"}, 403)
                 elif student_id != expected_student:
+                    environ["login_reason"] = "student_mismatch"
                     log_login(environ, qq, student_id, name, "failure", "student_mismatch")
                     status, headers, body = json_response({"ok": False, "error": "学号与 QQ 号不匹配，请核对后重试。"}, 403)
                 else:
+                    environ["login_reason"] = "ok"
                     token = secrets.token_urlsafe(32)
                     csrf = secrets.token_urlsafe(24)
                     with STATE_LOCK:
@@ -524,8 +594,9 @@ def application(environ: dict, start_response):
         safe_ua = environ.get("HTTP_USER_AGENT", "").replace("\r", " ").replace("\n", " ")[:200]
         status_code = status.split(" ", 1)[0]
         if status_code not in {"200", "302"} and not (status_code == "404" and path == "/favicon.ico"):
+            login_reason = environ.get("login_reason")
             LOGGER.info(
-                "request_id=%s method=%s path=%s status=%s duration_ms=%.1f ip=%s user_agent=%s",
+                "request_id=%s method=%s path=%s status=%s duration_ms=%.1f ip=%s user_agent=%s%s",
                 request_id,
                 method,
                 path,
@@ -533,6 +604,7 @@ def application(environ: dict, start_response):
                 elapsed_ms,
                 client_ip(environ),
                 safe_ua,
+                f" login_reason={login_reason}" if login_reason else "",
             )
         response_headers = list(headers)
         response_headers.append(("X-Request-ID", request_id))
@@ -567,8 +639,12 @@ def application(environ: dict, start_response):
 
 
 if __name__ == "__main__":
-    init_db()
-    port = int(os.environ.get("SURVEY_PORT", "8000"))
-    with make_server("0.0.0.0", port, application, handler_class=QuietWSGIRequestHandler) as server:
-        LOGGER.info("server_started address=http://127.0.0.1:%s deadline=%s database=%s log=%s", port, DEADLINE.isoformat(sep=" "), DATABASE_PATH, LOG_PATH)
-        server.serve_forever()
+    try:
+        init_db()
+        port = int(os.environ.get("SURVEY_PORT", "8000"))
+        with StableWSGIServer(("0.0.0.0", port), application, QuietWSGIRequestHandler) as server:
+            LOGGER.info("server_started address=http://127.0.0.1:%s deadline=%s database=%s log=%s", port, DEADLINE.isoformat(sep=" "), DATABASE_PATH, LOG_PATH)
+            server.serve_forever()
+    except Exception:
+        LOGGER.exception("server_start_failed")
+        raise
