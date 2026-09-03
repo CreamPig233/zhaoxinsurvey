@@ -230,3 +230,64 @@ ol { margin: 0; padding-left: 20px; }
   .lead { font-size: 17px; }
   .page-intro { padding-top: 48px; }
 }
+
+.admin-page { min-height: 100vh; background: var(--parchment); }
+.admin-shell { max-width: 1440px; margin: 0 auto; padding: 0 40px 96px; }
+.admin-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; padding: 82px 0 62px; border-bottom: 1px solid var(--hairline); }
+.admin-intro h1 { margin: 18px 0 16px; font-size: clamp(44px, 6vw, 72px); }
+.admin-lead { max-width: 620px; margin: 0; color: var(--muted); font-size: 19px; line-height: 1.5; letter-spacing: 0; }
+.admin-actions { display: flex; align-items: center; gap: 12px; min-width: min(100%, 460px); }
+.search-field { display: flex; grid-template-columns: none; flex: 1; flex-direction: row; align-items: center; gap: 8px; min-height: 46px; padding: 0 14px; color: var(--muted); background: var(--white); border: 1px solid #d2d2d7; border-radius: 9999px; font-size: 22px; font-weight: 400; }
+.search-field input { min-height: 42px; padding: 8px 0; border: 0; box-shadow: none; font-size: 14px; }
+.search-field input:focus { box-shadow: none; }
+.admin-badge { padding: 3px 6px; color: #a1a1a6; border: 1px solid #555; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; letter-spacing: 1px; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--hairline); }
+.metric { min-height: 148px; padding: 30px 30px 28px 0; border-right: 1px solid var(--hairline); }
+.metric + .metric { padding-left: 30px; }
+.metric:last-child { border-right: 0; }
+.metric-label, .metric-note { display: block; color: var(--muted); font-size: 13px; letter-spacing: 0; }
+.metric strong { display: block; margin: 12px 0 5px; color: var(--ink); font-family: "SF Pro Display", system-ui, sans-serif; font-size: 30px; font-weight: 600; line-height: 1.15; letter-spacing: 0; }
+.metric-note { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; }
+.submissions-section { padding-top: 68px; }
+.admin-section-heading { margin-bottom: 28px; }
+.admin-table-wrap { margin-top: 18px; overflow-x: auto; background: var(--white); border: 1px solid #d2d2d7; border-radius: 8px; }
+.admin-table { width: 100%; min-width: 1120px; border-collapse: collapse; table-layout: fixed; }
+.admin-table th { padding: 16px 18px; color: var(--muted); background: var(--pearl); border-bottom: 1px solid var(--hairline); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; font-weight: 400; letter-spacing: .7px; text-align: left; text-transform: uppercase; }
+.admin-table th:nth-child(1) { width: 170px; }
+.admin-table th:nth-child(2) { width: 64px; }
+.admin-table th:nth-child(3) { width: 205px; }
+.admin-table th:nth-child(4) { width: 95px; }
+.admin-table th:nth-child(7) { width: 155px; }
+.admin-table td { padding: 20px 18px; color: var(--ink); border-bottom: 1px solid var(--hairline); font-size: 14px; line-height: 1.5; vertical-align: top; letter-spacing: 0; }
+.admin-table tbody tr:last-child td { border-bottom: 0; }
+.admin-table tbody tr:hover { background: #f7f7f9; }
+.applicant-name { font-weight: 600; }
+.applicant-meta { margin-top: 5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; line-height: 1.6; }
+.department-order { margin: 0; padding-left: 20px; }
+.department-order li + li { margin-top: 4px; }
+.table-long-text { max-height: 160px; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.submitted-time { color: var(--muted) !important; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px !important; }
+.table-state { padding: 64px 20px !important; color: var(--muted) !important; text-align: center; }
+
+@media (max-width: 900px) {
+  .admin-shell { padding-right: 24px; padding-left: 24px; }
+  .admin-intro { display: block; padding-top: 64px; }
+  .admin-actions { margin-top: 32px; }
+}
+
+@media (max-width: 600px) {
+  .admin-shell { padding-right: 18px; padding-left: 18px; }
+  .admin-intro { padding: 52px 0 42px; }
+  .admin-intro h1 { font-size: 44px; }
+  .admin-lead { font-size: 17px; }
+  .admin-actions { display: grid; grid-template-columns: 1fr auto; min-width: 0; }
+  .search-field { min-width: 0; }
+  .search-field input { min-width: 0; }
+  .metrics { grid-template-columns: 1fr; }
+  .metric, .metric + .metric { min-height: 0; padding: 20px 0; border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .metric:last-child { border-bottom: 0; }
+  .metric strong { margin-top: 7px; }
+  .submissions-section { padding-top: 48px; }
+  .admin-section-heading { gap: 14px; }
+  .admin-table-wrap { margin-right: -18px; margin-left: -18px; border-right: 0; border-left: 0; border-radius: 0; }
+}

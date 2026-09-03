@@ -34,7 +34,7 @@ CSV_PATH = BASE_DIR / "users.csv"
 DATABASE_PATH = BASE_DIR / "data" / "survey.sqlite3"
 LOG_PATH = BASE_DIR / "logs" / "app.log"
 CSV_HAS_HEADER = False
-USE_LOCAL_USERS_CSV = False
+USE_LOCAL_USERS_CSV =True
 REMOTE_USERS_CSV_SERVER = "45.125.44.183:10090"
 REMOTE_USERS_CSV_SHARED_SECRET = "REMOTE_USERS_CSV_SHARED_SECRET"
 REMOTE_AUTH_TIMEOUT_SECONDS = 5
@@ -225,6 +225,28 @@ def load_users() -> dict[str, tuple[str, str]]:
             if qq:
                 users[qq] = (student_id, name)
     return users
+
+
+def is_admin_user(qq: str, authenticated_name: str = "") -> bool:
+    """Determine admin access from the name stored in users.csv."""
+    local_user = load_users().get(qq)
+    if local_user:
+        return local_user[1].startswith("管理员")
+    return USE_LOCAL_USERS_CSV and authenticated_name.startswith("管理员")
+
+
+def admin_submission(row: sqlite3.Row) -> dict:
+    return {
+        "qq": row["qq"],
+        "name": row["name"],
+        "student_id": row["student_id"],
+        "gender": row["gender"],
+        "departments": json.loads(row["departments_json"]),
+        "transfer": row["transfer"],
+        "strengths": row["strengths"],
+        "other_talents": row["other_talents"],
+        "submitted_at": row["submitted_at"],
+    }
 
 
 def auth_signature(secret: str, method: str, path: str, timestamp: str, nonce: str, body: bytes, status: int | None = None) -> str:
@@ -566,7 +588,7 @@ def _application(environ: dict, start_response):
         start_response(f"{status} Not Found", headers)
         return [body]
 
-    if deadline_passed():
+    if deadline_passed() and path not in {"/admin", "/api/admin/submissions"}:
         if path.startswith("/api/"):
             status, headers, body = json_response({"ok": False, "error": "报名已截止。"}, 410)
         else:
@@ -620,17 +642,45 @@ def _application(environ: dict, start_response):
                     environ["login_reason"] = "ok"
                     token = secrets.token_urlsafe(32)
                     csrf = secrets.token_urlsafe(24)
+                    is_admin = is_admin_user(qq, name)
                     with STATE_LOCK:
-                        SESSIONS[token] = {"qq": qq, "student_id": expected_student, "name": name, "csrf": csrf, "created_at": now()}
+                        SESSIONS[token] = {"qq": qq, "student_id": expected_student, "name": name, "is_admin": is_admin, "csrf": csrf, "created_at": now()}
                     log_login(environ, qq, expected_student, name, "success", "ok")
                     status, headers, body = json_response(
-                        {"ok": True, "name": name, "qq": qq, "student_id": expected_student, "csrf": csrf},
+                        {"ok": True, "name": name, "qq": qq, "student_id": expected_student, "csrf": csrf, "is_admin": is_admin},
                         extra_headers=[("Set-Cookie", "survey_session=" + token + "; HttpOnly; SameSite=Lax; Path=/")],
                     )
+    elif path == "/admin" and method == "GET":
+        _, session = session_from_request(environ)
+        if not session:
+            status, headers, body = redirect("/login")
+        elif not session.get("is_admin"):
+            status, headers, body = html_response("<h1>无权访问</h1><p>该页面仅供管理员使用。</p>", 403)
+        else:
+            status, headers, body = html_response(render_page("admin.html"))
+    elif path == "/api/admin/submissions" and method == "GET":
+        _, session = session_from_request(environ)
+        if not session:
+            status, headers, body = json_response({"ok": False, "error": "登录已失效，请重新登录。"}, 401)
+        elif not session.get("is_admin"):
+            status, headers, body = json_response({"ok": False, "error": "无权访问管理员数据。"}, 403)
+        else:
+            with db_connect() as conn:
+                rows = conn.execute(
+                    "SELECT qq, name, student_id, gender, departments_json, transfer, strengths, other_talents, submitted_at "
+                    "FROM submissions ORDER BY submitted_at DESC, student_id ASC"
+                ).fetchall()
+            submissions = [admin_submission(row) for row in rows]
+            latest_submitted_at = submissions[0]["submitted_at"] if submissions else None
+            status, headers, body = json_response(
+                {"ok": True, "count": len(submissions), "latest_submitted_at": latest_submitted_at, "submissions": submissions}
+            )
     elif path == "/questionnaire" and method == "GET":
         _, session = session_from_request(environ)
         if not session:
             status, headers, body = redirect("/login")
+        elif session.get("is_admin"):
+            status, headers, body = redirect("/admin")
         else:
             status, headers, body = html_response(render_page("questionnaire.html"))
     elif path == "/success.html" and method == "GET":
@@ -648,7 +698,7 @@ def _application(environ: dict, start_response):
         else:
             with db_connect() as conn:
                 row = conn.execute("SELECT * FROM submissions WHERE student_id = ?", (session["student_id"],)).fetchone()
-            status, headers, body = json_response({"ok": True, "name": session["name"], "qq": session["qq"], "student_id": session["student_id"], "csrf": session["csrf"], "submission": public_submission(row)})
+            status, headers, body = json_response({"ok": True, "name": session["name"], "qq": session["qq"], "student_id": session["student_id"], "csrf": session["csrf"], "is_admin": bool(session.get("is_admin")), "submission": public_submission(row)})
     elif path == "/api/submit" and method == "POST":
         session, auth_error = require_session(environ)
         if auth_error:

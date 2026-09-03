@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>报名数据后台 · 先锋网络中心</title>
+  <link rel="icon" href="/favicon.ico" type="image/png">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="admin-page">
+  <header class="topbar">
+    <a class="wordmark" href="/admin"><img class="wordmark-logo" src="/static/logo.png" alt="先锋网络中心"></a>
+    <div class="topbar-meta"><span class="status-dot"></span><span id="header-name">管理员</span><span class="admin-badge">ADMIN</span><button id="logout" class="text-button" type="button">退出</button></div>
+  </header>
+
+  <main class="admin-shell">
+    <section class="admin-intro">
+      <div>
+        <p class="eyebrow">ADMIN / APPLICATIONS 2026</p>
+        <h1>报名数据后台</h1>
+        <p class="admin-lead">查看当前已提交的报名信息。数据来自报名系统的最终提交记录。</p>
+      </div>
+      <div class="admin-actions">
+        <label class="search-field" for="search-input"><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="搜索姓名、学号或 QQ 号" autocomplete="off"></label>
+        <button id="refresh-button" class="pill-button" type="button" title="重新读取报名数据"><span aria-hidden="true">↻</span>刷新</button>
+      </div>
+    </section>
+
+    <section class="metrics" aria-label="报名概览">
+      <article class="metric"><span class="metric-label">已提交</span><strong id="submission-count">--</strong><span class="metric-note">当前最终记录</span></article>
+      <article class="metric"><span class="metric-label">最近提交</span><strong id="latest-submitted">--</strong><span class="metric-note">按提交时间排序</span></article>
+      <article class="metric"><span class="metric-label">数据状态</span><strong id="data-status">读取中</strong><span id="status-detail" class="metric-note">正在连接报名数据库</span></article>
+    </section>
+
+    <section class="submissions-section" aria-labelledby="submissions-heading">
+      <div class="section-heading admin-section-heading"><span class="section-number">01</span><div><h2 id="submissions-heading">报名记录</h2><p id="result-summary">正在读取已提交数据</p></div></div>
+      <p id="admin-error" class="form-error" role="alert"></p>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr><th scope="col">报名人</th><th scope="col">性别</th><th scope="col">部门志愿</th><th scope="col">服从调剂</th><th scope="col">个人优势及未来工作设想</th><th scope="col">其它特长</th><th scope="col">提交时间</th></tr></thead>
+          <tbody id="submissions-body"><tr><td colspan="7" class="table-state">正在读取报名数据…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const searchInput = document.querySelector('#search-input');
+    const refreshButton = document.querySelector('#refresh-button');
+    const submissionsBody = document.querySelector('#submissions-body');
+    const errorEl = document.querySelector('#admin-error');
+    let submissions = [];
+    let csrf = '';
+
+    function logClientError(message, details = {}) {
+      console.error(`[survey-admin] ${message}`, { ...details, online: navigator.onLine, time: new Date().toISOString() });
+    }
+
+    async function apiJSON(url, options = {}) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 15000);
+      let response;
+      try {
+        response = await fetch(url, { ...options, credentials: 'same-origin', signal: controller.signal });
+      } catch (requestError) {
+        if (requestError?.name === 'AbortError') throw new Error('服务响应超时，请稍后重试。');
+        throw new Error('暂时无法连接报名服务，请稍后重试。');
+      } finally {
+        window.clearTimeout(timeout);
+      }
+      const raw = await response.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (parseError) {
+        logClientError('接口返回非 JSON', {url, status: response.status, error: parseError});
+        throw new Error(`服务响应格式错误（HTTP ${response.status}）。`);
+      }
+      return {response, data};
+    }
+
+    const escapeHTML = value => {
+      const node = document.createElement('span');
+      node.textContent = value == null ? '' : String(value);
+      return node.innerHTML;
+    };
+
+    function formatTime(value) {
+      return value ? String(value).replace('T', ' ') : '—';
+    }
+
+    function renderMetrics(data) {
+      document.querySelector('#submission-count').textContent = String(data.count).padStart(2, '0');
+      document.querySelector('#latest-submitted').textContent = formatTime(data.latest_submitted_at);
+      document.querySelector('#data-status').textContent = '已同步';
+      document.querySelector('#status-detail').textContent = `最后读取 ${formatTime(new Date().toISOString().slice(0, 19))}`;
+    }
+
+    function renderRows() {
+      const keyword = searchInput.value.trim().toLowerCase();
+      const visible = submissions.filter(item => [item.name, item.student_id, item.qq].some(value => String(value).toLowerCase().includes(keyword)));
+      document.querySelector('#result-summary').textContent = keyword ? `显示 ${visible.length} / ${submissions.length} 条记录` : `共 ${submissions.length} 条记录，按最近提交时间排列`;
+      if (!visible.length) {
+        submissionsBody.innerHTML = `<tr><td colspan="7" class="table-state">${keyword ? '没有匹配的报名记录' : '暂时还没有报名记录'}</td></tr>`;
+        return;
+      }
+      submissionsBody.innerHTML = visible.map(item => `<tr>
+        <td data-label="报名人"><div class="applicant-name">${escapeHTML(item.name)}</div><div class="applicant-meta">学号 ${escapeHTML(item.student_id)} · QQ ${escapeHTML(item.qq)}</div></td>
+        <td data-label="性别">${escapeHTML(item.gender)}</td>
+        <td data-label="部门志愿"><ol class="department-order">${item.departments.map(department => `<li>${escapeHTML(department)}</li>`).join('')}</ol></td>
+        <td data-label="服从调剂">${escapeHTML(item.transfer)}</td>
+        <td data-label="个人优势及未来工作设想"><p class="table-long-text">${escapeHTML(item.strengths) || '—'}</p></td>
+        <td data-label="其它特长"><p class="table-long-text">${escapeHTML(item.other_talents) || '—'}</p></td>
+        <td data-label="提交时间" class="submitted-time">${escapeHTML(formatTime(item.submitted_at))}</td>
+      </tr>`).join('');
+    }
+
+    async function loadSubmissions() {
+      refreshButton.disabled = true;
+      errorEl.textContent = '';
+      document.querySelector('#data-status').textContent = '读取中';
+      try {
+        const {response, data} = await apiJSON('/api/admin/submissions');
+        if (response.status === 401) return location.href = '/login';
+        if (!response.ok || !data.ok) throw new Error(data.error || '报名数据读取失败。');
+        submissions = Array.isArray(data.submissions) ? data.submissions : [];
+        renderMetrics(data);
+        renderRows();
+      } catch (error) {
+        logClientError('读取报名数据失败', {error});
+        document.querySelector('#data-status').textContent = '读取失败';
+        document.querySelector('#status-detail').textContent = '请稍后重试';
+        submissionsBody.innerHTML = '<tr><td colspan="7" class="table-state">报名数据读取失败，请点击“刷新”重试。</td></tr>';
+        errorEl.textContent = error.message || '报名数据读取失败。';
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    searchInput.addEventListener('input', renderRows);
+    refreshButton.addEventListener('click', loadSubmissions);
+    document.querySelector('#logout').addEventListener('click', async () => {
+      try {
+        await apiJSON('/api/logout', {method: 'POST', headers: {'X-CSRF-Token': csrf}});
+      } catch (error) {
+        logClientError('退出流程失败', {error});
+      }
+      location.href = '/login';
+    });
+
+    async function loadIdentity() {
+      try {
+        const {response, data} = await apiJSON('/api/me');
+        if (!response.ok || !data.is_admin) return location.href = '/login';
+        csrf = data.csrf || '';
+        document.querySelector('#header-name').textContent = data.name;
+        loadSubmissions();
+      } catch (error) {
+        logClientError('读取管理员身份失败', {error});
+        location.href = '/login';
+      }
+    }
+    loadIdentity();
+  </script>
+</body>
+</html>

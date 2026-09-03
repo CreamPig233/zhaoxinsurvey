@@ -93,7 +93,7 @@
         });
         if (!data.ok) throw new Error(data.error || '登录失败，请稍后重试。');
         saveLoginIdentity(data);
-        location.href = '/questionnaire';
+        location.href = data.is_admin ? '/admin' : '/questionnaire';
       } catch (err) {
         logClientError('登录流程失败', {error: err});
         error.textContent = err.message;
