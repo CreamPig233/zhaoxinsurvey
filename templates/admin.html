@@ -106,6 +106,13 @@
       return value ? String(value).replace('T', ' ') : '—';
     }
 
+    function formatCollege(item) {
+      const college = String(item.college || '').trim();
+      const campus = String(item.campus || '').trim();
+      if (!college) return '—';
+      return campus && campus !== '未知' ? `${campus}-${college}` : college;
+    }
+
     function renderMetrics(data) {
       document.querySelector('#submission-count').textContent = String(data.count).padStart(2, '0');
       document.querySelector('#latest-submitted').textContent = formatTime(data.latest_submitted_at);
@@ -143,7 +150,7 @@
       }
       submissionsBody.innerHTML = visible.map(item => `<tr>
         <td data-label="操作" class="annotation-cell">${annotationButtons(item)}</td>
-        <td data-label="报名人"><div class="applicant-name">${escapeHTML(item.name)} ${genderSymbol(item.gender)}</div><div class="applicant-meta"><div>学号：${escapeHTML(item.student_id) || '—'}</div><div>学院：${escapeHTML(item.campus) || '未知'}-${escapeHTML(item.college) || '未知'}</div><div>QQ号：${escapeHTML(item.qq) || '—'}</div><div>群昵称：${escapeHTML(item.group_card) || '—'}</div></div></td>
+        <td data-label="报名人"><div class="applicant-name">${escapeHTML(item.name)} ${genderSymbol(item.gender)}</div><div class="applicant-meta"><div>学号：${escapeHTML(item.student_id) || '—'}</div><div>学院：${escapeHTML(formatCollege(item))}</div><div>专业：${escapeHTML(item.major) || '—'}</div><div>QQ号：${escapeHTML(item.qq) || '—'}</div><div>群昵称：${escapeHTML(item.group_card) || '—'}</div></div></td>
         <td data-label="部门志愿"><ol class="department-order">${item.departments.map(department => `<li>${escapeHTML(department)}</li>`).join('')}</ol></td>
         <td data-label="服从调剂">${escapeHTML(item.transfer)}</td>
         <td data-label="个人优势及未来工作设想"><p class="table-long-text">${escapeHTML(item.strengths) || '—'}</p></td>

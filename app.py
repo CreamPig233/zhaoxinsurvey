@@ -320,6 +320,14 @@ def load_users() -> dict[str, dict[str, str]]:
     return users
 
 
+def load_users_by_student_id() -> dict[str, dict[str, str]]:
+    return {
+        user["student_id"]: user
+        for user in load_users().values()
+        if user.get("student_id")
+    }
+
+
 def is_admin_user(qq: str, authenticated_name: str = "") -> bool:
     """Determine admin access from the name stored in users.csv."""
     local_user = load_users().get(qq)
@@ -328,21 +336,22 @@ def is_admin_user(qq: str, authenticated_name: str = "") -> bool:
     return USE_LOCAL_USERS_CSV and authenticated_name.startswith("管理员")
 
 
-def admin_submission(row: sqlite3.Row) -> dict:
+def admin_submission(row: sqlite3.Row, identity: dict[str, str] | None = None) -> dict:
+    identity = identity or {}
+    college = identity.get("college", "")
     return {
         "qq": row["qq"],
         "name": row["name"],
         "student_id": row["student_id"],
-        "college": row["college"],
-        "group_card": row["group_card"],
-        "campus": row["campus"],
+        "college": college,
+        "group_card": identity.get("group_card", ""),
+        "campus": campus_for_college(college),
         "major": row["major"],
         "gender": row["gender"],
         "departments": json.loads(row["departments_json"]),
         "transfer": row["transfer"],
         "strengths": row["strengths"],
         "other_talents": row["other_talents"],
-        "major": row["major"],
         "submitted_at": row["submitted_at"],
         "star_count": len(parse_annotation_list(row["stars_json"])),
         "comment_count": len(parse_annotation_list(row["comments_json"])),
@@ -817,7 +826,8 @@ def _application(environ: dict, start_response):
                     "FROM submissions AS s LEFT JOIN admin_annotations AS a ON a.student_id = s.student_id "
                     "ORDER BY s.submitted_at DESC, s.student_id ASC"
                 ).fetchall()
-            submissions = [admin_submission(row) for row in rows]
+            users_by_student_id = load_users_by_student_id()
+            submissions = [admin_submission(row, users_by_student_id.get(row["student_id"])) for row in rows]
             latest_submitted_at = submissions[0]["submitted_at"] if submissions else None
             status, headers, body = json_response(
                 {"ok": True, "count": len(submissions), "latest_submitted_at": latest_submitted_at, "submissions": submissions}
