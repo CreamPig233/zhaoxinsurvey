@@ -24,7 +24,10 @@ from threading import Lock
 BASE_DIR = Path(__file__).resolve().parent
 CSV_PATH = BASE_DIR / "users.csv"
 CSV_HAS_HEADER = True
-LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+LEGACY_MEDICAL_COLLEGES = {
+    "医学与生物信息工程学院（原中荷生物医学与信息工程学院）",
+    "医学与生物信息工程学院（中荷生物医学与信息工程学院）",
+}
 MEDICAL_COLLEGE = "医学与生物信息工程学院"
 SHARED_SECRET = "REMOTE_USERS_CSV_SHARED_SECRET"
 DEFAULT_HOST = "0.0.0.0"
@@ -54,7 +57,7 @@ def load_users() -> dict[str, dict[str, str]]:
             student_id = (row.get("学号") or "").strip()
             name = (row.get("姓名") or "").strip()
             college = (row.get("学院") or "").strip()
-            college = MEDICAL_COLLEGE if college == LEGACY_MEDICAL_COLLEGE else college
+            college = MEDICAL_COLLEGE if college in LEGACY_MEDICAL_COLLEGES else college
             # The source file currently uses 群名片; accept the earlier QQ群名片 spelling too.
             group_card = (row.get("QQ群名片") or row.get("群名片") or "").strip()
             if qq:

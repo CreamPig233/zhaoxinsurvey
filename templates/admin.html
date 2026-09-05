@@ -37,8 +37,8 @@
       <p id="admin-error" class="form-error" role="alert"></p>
       <div class="admin-table-wrap">
         <table class="admin-table">
-          <thead><tr><th scope="col">操作</th><th scope="col">报名人</th><th scope="col">学院</th><th scope="col">校区</th><th scope="col">QQ群名片</th><th scope="col">专业</th><th scope="col">性别</th><th scope="col">部门志愿</th><th scope="col">服从调剂</th><th scope="col">个人优势及未来工作设想</th><th scope="col">其它特长</th><th scope="col">提交时间</th></tr></thead>
-          <tbody id="submissions-body"><tr><td colspan="12" class="table-state">正在读取报名数据…</td></tr></tbody>
+          <thead><tr><th scope="col">操作</th><th scope="col">报名人</th><th scope="col">部门志愿</th><th scope="col">服从调剂</th><th scope="col">个人优势及未来工作设想</th><th scope="col">其它特长</th><th scope="col">提交时间</th></tr></thead>
+          <tbody id="submissions-body"><tr><td colspan="7" class="table-state">正在读取报名数据…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -127,22 +127,23 @@
       </div>`;
     }
 
+    function genderSymbol(gender) {
+      if (gender === '男') return '<span class="gender-symbol" style="color:#0066cc" aria-label="男">♂</span>';
+      if (gender === '女') return '<span class="gender-symbol" style="color:#d70015" aria-label="女">♀</span>';
+      return '';
+    }
+
     function renderRows() {
       const keyword = searchInput.value.trim().toLowerCase();
       const visible = submissions.filter(item => [item.name, item.student_id, item.qq, item.college, item.campus, item.group_card, item.major].some(value => String(value).toLowerCase().includes(keyword)));
       document.querySelector('#result-summary').textContent = keyword ? `显示 ${visible.length} / ${submissions.length} 条记录` : `共 ${submissions.length} 条记录，按最近提交时间排列`;
       if (!visible.length) {
-        submissionsBody.innerHTML = `<tr><td colspan="12" class="table-state">${keyword ? '没有匹配的报名记录' : '暂时还没有报名记录'}</td></tr>`;
+        submissionsBody.innerHTML = `<tr><td colspan="7" class="table-state">${keyword ? '没有匹配的报名记录' : '暂时还没有报名记录'}</td></tr>`;
         return;
       }
       submissionsBody.innerHTML = visible.map(item => `<tr>
         <td data-label="操作" class="annotation-cell">${annotationButtons(item)}</td>
-        <td data-label="报名人"><div class="applicant-name">${escapeHTML(item.name)}</div><div class="applicant-meta">学号 ${escapeHTML(item.student_id)} · QQ ${escapeHTML(item.qq)}</div></td>
-        <td data-label="学院">${escapeHTML(item.college) || '—'}</td>
-        <td data-label="校区">${escapeHTML(item.campus) || '未知'}</td>
-        <td data-label="QQ群名片">${escapeHTML(item.group_card) || '—'}</td>
-        <td data-label="专业">${escapeHTML(item.major) || '—'}</td>
-        <td data-label="性别">${escapeHTML(item.gender)}</td>
+        <td data-label="报名人"><div class="applicant-name">${escapeHTML(item.name)} ${genderSymbol(item.gender)}</div><div class="applicant-meta"><div>学号：${escapeHTML(item.student_id) || '—'}</div><div>学院：${escapeHTML(item.campus) || '未知'}-${escapeHTML(item.college) || '未知'}</div><div>QQ号：${escapeHTML(item.qq) || '—'}</div><div>群昵称：${escapeHTML(item.group_card) || '—'}</div></div></td>
         <td data-label="部门志愿"><ol class="department-order">${item.departments.map(department => `<li>${escapeHTML(department)}</li>`).join('')}</ol></td>
         <td data-label="服从调剂">${escapeHTML(item.transfer)}</td>
         <td data-label="个人优势及未来工作设想"><p class="table-long-text">${escapeHTML(item.strengths) || '—'}</p></td>
@@ -239,7 +240,7 @@
         logClientError('读取报名数据失败', {error});
         document.querySelector('#data-status').textContent = '读取失败';
         document.querySelector('#status-detail').textContent = '请稍后重试';
-        submissionsBody.innerHTML = '<tr><td colspan="12" class="table-state">报名数据读取失败，请点击“刷新”重试。</td></tr>';
+        submissionsBody.innerHTML = '<tr><td colspan="7" class="table-state">报名数据读取失败，请点击“刷新”重试。</td></tr>';
         errorEl.textContent = error.message || '报名数据读取失败。';
       } finally {
         refreshButton.disabled = false;

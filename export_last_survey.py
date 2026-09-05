@@ -11,7 +11,10 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATABASE = BASE_DIR / "data" / "survey.sqlite3"
 DEFAULT_OUTPUT = BASE_DIR / "last_survey.csv"
-LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+LEGACY_MEDICAL_COLLEGES = {
+    "医学与生物信息工程学院（原中荷生物医学与信息工程学院）",
+    "医学与生物信息工程学院（中荷生物医学与信息工程学院）",
+}
 MEDICAL_COLLEGE = "医学与生物信息工程学院"
 HEADERS = [
     "QQ号",
@@ -95,7 +98,7 @@ def export_submissions(database: Path, output: Path) -> int:
                     row["qq"],
                     row["name"],
                     row["student_id"],
-                    MEDICAL_COLLEGE if row["college"] == LEGACY_MEDICAL_COLLEGE else row["college"],
+                    MEDICAL_COLLEGE if row["college"] in LEGACY_MEDICAL_COLLEGES else row["college"],
                     row["group_card"],
                     row["campus"],
                     row["major"],

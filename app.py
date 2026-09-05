@@ -70,7 +70,10 @@ CAMPUS_BY_COLLEGE = {
         "机器人科学与工程学院", "未来技术学院",
     },
 }
-LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+LEGACY_MEDICAL_COLLEGES = {
+    "医学与生物信息工程学院（原中荷生物医学与信息工程学院）",
+    "医学与生物信息工程学院（中荷生物医学与信息工程学院）",
+}
 MEDICAL_COLLEGE = "医学与生物信息工程学院"
 SESSIONS: dict[str, dict] = {}
 RATE_BUCKETS: dict[str, list[float]] = {}
@@ -202,7 +205,7 @@ def campus_for_college(college: str) -> str:
 
 
 def normalize_college(college: str) -> str:
-    return MEDICAL_COLLEGE if college == LEGACY_MEDICAL_COLLEGE else college
+    return MEDICAL_COLLEGE if college in LEGACY_MEDICAL_COLLEGES else college
 
 
 def majors_for_college(college: str) -> tuple[str, ...]:
@@ -286,7 +289,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE submissions ADD COLUMN campus TEXT NOT NULL DEFAULT '未知'")
         if "major" not in columns:
             conn.execute("ALTER TABLE submissions ADD COLUMN major TEXT NOT NULL DEFAULT ''")
-        conn.execute("UPDATE submissions SET college = ? WHERE college = ?", (MEDICAL_COLLEGE, LEGACY_MEDICAL_COLLEGE))
+        placeholders = ", ".join("?" for _ in LEGACY_MEDICAL_COLLEGES)
+        conn.execute(
+            f"UPDATE submissions SET college = ? WHERE college IN ({placeholders})",
+            (MEDICAL_COLLEGE, *LEGACY_MEDICAL_COLLEGES),
+        )
         for campus, colleges in CAMPUS_BY_COLLEGE.items():
             placeholders = ", ".join("?" for _ in colleges)
             conn.execute(
