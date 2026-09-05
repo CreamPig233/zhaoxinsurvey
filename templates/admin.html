@@ -26,6 +26,16 @@
       </div>
     </section>
 
+    <section class="admin-filters" aria-label="筛选报名记录">
+      <label>星标<select id="filter-star"><option value="all">全部</option><option value="yes">有星标</option><option value="no">无星标</option></select></label>
+      <label>批注<select id="filter-comment"><option value="all">全部</option><option value="yes">有批注</option><option value="no">无批注</option></select></label>
+      <label>校区<select id="filter-campus"><option value="all">全部校区</option></select></label>
+      <label>学院<select id="filter-college"><option value="all">全部学院</option></select></label>
+      <label>性别<select id="filter-gender"><option value="all">全部性别</option><option value="男">男</option><option value="女">女</option></select></label>
+      <label>部门志愿<select id="filter-department"><option value="all">全部部门</option></select></label>
+      <label>服从调剂<select id="filter-transfer"><option value="all">全部</option><option value="是">是</option><option value="否">否</option></select></label>
+    </section>
+
     <section class="metrics" aria-label="报名概览">
       <article class="metric"><span class="metric-label">已提交</span><strong id="submission-count">--</strong><span class="metric-note">当前最终记录</span></article>
       <article class="metric"><span class="metric-label">最近提交</span><strong id="latest-submitted">--</strong><span class="metric-note">按提交时间排序</span></article>
@@ -66,6 +76,7 @@
     const refreshButton = document.querySelector('#refresh-button');
     const submissionsBody = document.querySelector('#submissions-body');
     const errorEl = document.querySelector('#admin-error');
+    const filterElements = ['star', 'comment', 'campus', 'college', 'gender', 'department', 'transfer'].reduce((acc, key) => { acc[key] = document.querySelector(`#filter-${key}`); return acc; }, {});
     let submissions = [];
     let csrf = '';
 
@@ -129,7 +140,7 @@
 
     function annotationButtons(item) {
       return `<div class="annotation-buttons">
-        <button class="annotation-button" type="button" data-annotation-type="star" data-student-id="${escapeHTML(item.student_id)}" aria-label="查看星标" title="星标"><span aria-hidden="true">★</span>${item.star_count ? `<strong>${item.star_count}</strong>` : ''}</button>
+        <button class="annotation-button star-button${item.star_count ? ' has-stars' : ''}" type="button" data-annotation-type="star" data-student-id="${escapeHTML(item.student_id)}" aria-label="查看星标" title="星标"><span aria-hidden="true">★</span>${item.star_count ? `<strong>${item.star_count}</strong>` : ''}</button>
         <button class="annotation-button" type="button" data-annotation-type="comment" data-student-id="${escapeHTML(item.student_id)}" aria-label="查看批注" title="批注"><span aria-hidden="true">▱</span>${item.comment_count ? `<strong>${item.comment_count}</strong>` : ''}</button>
       </div>`;
     }
@@ -142,10 +153,21 @@
 
     function renderRows() {
       const keyword = searchInput.value.trim().toLowerCase();
-      const visible = submissions.filter(item => [item.name, item.student_id, item.qq, item.college, item.campus, item.group_card, item.major].some(value => String(value).toLowerCase().includes(keyword)));
-      document.querySelector('#result-summary').textContent = keyword ? `显示 ${visible.length} / ${submissions.length} 条记录` : `共 ${submissions.length} 条记录，按最近提交时间排列`;
+      const filters = filterElements;
+      const visible = submissions.filter(item => {
+        const matchesKeyword = !keyword || [item.name, item.student_id, item.qq, item.college, item.campus, item.group_card, item.major].some(value => String(value).toLowerCase().includes(keyword));
+        const matchesPresence = (value, count) => value === 'all' || (value === 'yes' ? count > 0 : count === 0);
+        return matchesKeyword && matchesPresence(filters.star.value, item.star_count) && matchesPresence(filters.comment.value, item.comment_count)
+          && (filters.campus.value === 'all' || item.campus === filters.campus.value)
+          && (filters.college.value === 'all' || item.college === filters.college.value)
+          && (filters.gender.value === 'all' || item.gender === filters.gender.value)
+          && (filters.department.value === 'all' || (item.departments || []).includes(filters.department.value))
+          && (filters.transfer.value === 'all' || item.transfer === filters.transfer.value);
+      });
+      const hasFilters = keyword || Object.values(filters).some(select => select.value !== 'all');
+      document.querySelector('#result-summary').textContent = hasFilters ? `显示 ${visible.length} / ${submissions.length} 条记录` : `共 ${submissions.length} 条记录，按最近提交时间排列`;
       if (!visible.length) {
-        submissionsBody.innerHTML = `<tr><td colspan="7" class="table-state">${keyword ? '没有匹配的报名记录' : '暂时还没有报名记录'}</td></tr>`;
+        submissionsBody.innerHTML = `<tr><td colspan="7" class="table-state">${hasFilters ? '没有匹配的报名记录' : '暂时还没有报名记录'}</td></tr>`;
         return;
       }
       submissionsBody.innerHTML = visible.map(item => `<tr>
@@ -158,6 +180,17 @@
         <td data-label="提交时间" class="submitted-time">${escapeHTML(formatTime(item.submitted_at))}</td>
       </tr>`).join('');
       submissionsBody.querySelectorAll('[data-annotation-type]').forEach(button => button.addEventListener('click', () => openAnnotations(button.dataset.studentId, button.dataset.annotationType)));
+    }
+
+    function populateFilterOptions() {
+      const fill = (select, values, label) => {
+        const current = select.value;
+        select.innerHTML = `<option value="all">${label}</option>` + values.sort((a, b) => a.localeCompare(b, 'zh-CN')).map(value => `<option value="${escapeHTML(value)}">${escapeHTML(value)}</option>`).join('');
+        select.value = values.includes(current) ? current : 'all';
+      };
+      fill(filterElements.campus, [...new Set(submissions.map(item => String(item.campus || '').trim()).filter(Boolean))], '全部校区');
+      fill(filterElements.college, [...new Set(submissions.map(item => String(item.college || '').trim()).filter(Boolean))], '全部学院');
+      fill(filterElements.department, [...new Set(submissions.flatMap(item => item.departments || []).map(String).filter(Boolean))], '全部部门');
     }
 
     function renderAnnotationRecords(records, type) {
@@ -242,6 +275,7 @@
         if (!response.ok || !data.ok) throw new Error(data.error || '报名数据读取失败。');
         submissions = Array.isArray(data.submissions) ? data.submissions : [];
         renderMetrics(data);
+        populateFilterOptions();
         renderRows();
       } catch (error) {
         logClientError('读取报名数据失败', {error});
@@ -255,6 +289,7 @@
     }
 
     searchInput.addEventListener('input', renderRows);
+    Object.values(filterElements).forEach(select => select.addEventListener('change', renderRows));
     refreshButton.addEventListener('click', loadSubmissions);
     document.querySelector('#logout').addEventListener('click', async () => {
       try {

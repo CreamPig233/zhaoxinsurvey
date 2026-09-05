@@ -253,6 +253,10 @@ ol { margin: 0; padding-left: 20px; }
 .search-field { display: flex; grid-template-columns: none; flex: 1; flex-direction: row; align-items: center; gap: 8px; min-height: 46px; padding: 0 14px; color: var(--muted); background: var(--white); border: 1px solid #d2d2d7; border-radius: 9999px; font-size: 22px; font-weight: 400; }
 .search-field input { min-height: 42px; padding: 8px 0; border: 0; box-shadow: none; font-size: 14px; }
 .search-field input:focus { box-shadow: none; }
+.admin-filters { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 12px; padding: 24px 0; border-bottom: 1px solid var(--hairline); }
+.admin-filters label { display: grid; gap: 7px; color: var(--muted); font-size: 11px; }
+.admin-filters select { width: 100%; min-height: 40px; padding: 8px 30px 8px 11px; color: var(--ink); background: var(--white); border: 1px solid #d2d2d7; border-radius: 6px; font-size: 13px; }
+.admin-filters select:focus { outline: 2px solid rgba(0, 102, 204, .25); outline-offset: 1px; border-color: #0066cc; }
 .admin-badge { padding: 3px 6px; color: #a1a1a6; border: 1px solid #555; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; letter-spacing: 1px; }
 .metrics { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--hairline); }
 .metric { min-height: 148px; padding: 30px 30px 28px 0; border-right: 1px solid var(--hairline); }
@@ -288,6 +292,8 @@ ol { margin: 0; padding-left: 20px; }
 .annotation-buttons { display: grid !important; grid-template-columns: 42px; justify-items: center; gap: 8px; }
 .annotation-button { position: relative; width: 42px; height: 36px; padding: 0; color: var(--muted); background: var(--pearl); border: 1px solid #d2d2d7; border-radius: 9px; font-size: 19px; line-height: 1; }
 .annotation-button:hover { color: var(--blue); border-color: var(--blue); background: #f4f8fd; }
+.annotation-button.star-button.has-stars { color: #b7791f; border-color: #d6a84f; background: #fff8e7; }
+.annotation-button.star-button.has-stars:hover { color: #996515; border-color: #b7791f; background: #fff1c7; }
 .annotation-button strong { position: absolute; top: -8px; right: -7px; min-width: 18px; height: 18px; padding: 1px 4px; color: var(--white); background: var(--blue); border: 2px solid var(--white); border-radius: 999px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; font-weight: 500; line-height: 14px; }
 .annotation-dialog { width: min(620px, calc(100% - 32px)); max-height: min(760px, calc(100% - 32px)); padding: 0; color: var(--ink); background: var(--white); border: 0; border-radius: 18px; }
 .annotation-dialog::backdrop { background: rgba(0, 0, 0, .48); backdrop-filter: blur(8px); }
@@ -307,6 +313,7 @@ ol { margin: 0; padding-left: 20px; }
   .admin-shell { padding-right: 24px; padding-left: 24px; }
   .admin-intro { display: block; padding-top: 64px; }
   .admin-actions { margin-top: 32px; }
+  .admin-filters { grid-template-columns: repeat(4, minmax(130px, 1fr)); }
 }
 
 @media (max-width: 600px) {
@@ -317,6 +324,7 @@ ol { margin: 0; padding-left: 20px; }
   .admin-actions { display: grid; grid-template-columns: 1fr auto; min-width: 0; }
   .search-field { min-width: 0; }
   .search-field input { min-width: 0; }
+  .admin-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .metrics { grid-template-columns: 1fr; }
   .metric, .metric + .metric { min-height: 0; padding: 20px 0; border-right: 0; border-bottom: 1px solid var(--hairline); }
   .metric:last-child { border-bottom: 0; }
