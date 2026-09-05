@@ -104,6 +104,7 @@ input, select, textarea {
 }
 input, select { min-height: 48px; }
 select {
+  width: 40%;
   appearance: none;
   -webkit-appearance: none;
   padding-right: 44px;
@@ -265,9 +266,13 @@ ol { margin: 0; padding-left: 20px; }
 .admin-table-wrap { margin-top: 18px; overflow-x: auto; background: var(--white); border: 1px solid #d2d2d7; border-radius: 8px; }
 .admin-table { width: 100%; min-width: 1120px; border-collapse: collapse; table-layout: auto; }
 .admin-table th { padding: 16px 18px; color: var(--muted); background: var(--pearl); border-bottom: 1px solid var(--hairline); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; font-weight: 400; letter-spacing: .7px; text-align: left; text-transform: uppercase; }
-.admin-table th:nth-child(1) { width: 126px; }
-.admin-table th:nth-child(2) { width: 210px; }
-.admin-table th:nth-child(4) { width: 95px; }
+.admin-table th:nth-child(1) { width: 5%; }
+.admin-table th:nth-child(2) { width: 10%; }
+.admin-table th:nth-child(3) { width: 15%; }
+.admin-table th:nth-child(4) { width: 5%; }
+.admin-table th:nth-child(5) { width: 30%; }
+.admin-table th:nth-child(6) { width: 27%; }
+.admin-table th:nth-child(7) { width: 8%; }
 .admin-table td { padding: 20px 18px; color: var(--ink); border-bottom: 1px solid var(--hairline); font-size: 14px; line-height: 1.5; vertical-align: top; letter-spacing: 0; }
 .admin-table tbody tr:last-child td { border-bottom: 0; }
 .admin-table tbody tr:hover { background: #f7f7f9; }

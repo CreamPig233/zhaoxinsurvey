@@ -20,18 +20,20 @@
     </section>
     <form id="survey-form" class="survey-form" novalidate>
       <section class="form-section identity-section">
-        <div class="section-heading"><span class="section-number">01</span><div><h2>身份信息</h2><p>信息来自报名名单，不可修改。</p></div></div>
+        <div class="section-heading"><span class="section-number">01</span><div><h2>身份信息</h2><p>基础信息如需要修改，请联系管理员。</p></div></div>
         <div class="identity-grid">
           <label>姓名<input id="name" readonly></label>
           <label>学号<input id="student-id" readonly></label>
           <label>学院<input id="college" readonly></label>
           <label>校区<input id="campus" readonly></label>
           <label>QQ 号<input id="qq" readonly></label>
-          <label>专业<select id="major" required><option value="">请选择专业</option></select></label>
+
         </div>
       </section>
       <section class="form-section">
         <div class="section-heading"><span class="section-number">02</span><div><h2>关于你</h2><p>先从一个简单的问题开始。</p></div></div>
+        <label>专业<select id="major" required><option value="">请选择专业</option></select></label>
+        <br>
         <fieldset class="choice-fieldset"><legend>性别 <span class="required">必填</span></legend><div class="choice-row"><label class="choice"><input type="radio" name="gender" value="男"><span>男</span></label><label class="choice"><input type="radio" name="gender" value="女"><span>女</span></label></div></fieldset>
       </section>
       <section class="form-section">
