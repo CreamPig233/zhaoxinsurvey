@@ -11,10 +11,16 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATABASE = BASE_DIR / "data" / "survey.sqlite3"
 DEFAULT_OUTPUT = BASE_DIR / "last_survey.csv"
+LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+MEDICAL_COLLEGE = "医学与生物信息工程学院"
 HEADERS = [
     "QQ号",
     "姓名",
     "学号",
+    "学院",
+    "QQ群名片",
+    "校区",
+    "专业",
     "性别",
     "部门志愿1",
     "部门志愿2",
@@ -50,9 +56,15 @@ def submission_rows(connection: sqlite3.Connection):
         submitted_at_expression = "''"
         order_by = "student_id"
 
+    major_expression = "major" if "major" in columns else "''"
+    college_expression = "college" if "college" in columns else "''"
+    group_card_expression = "group_card" if "group_card" in columns else "''"
+    campus_expression = "campus" if "campus" in columns else "'未知'"
     return connection.execute(
         f"""
-        SELECT qq, name, gender, departments_json, transfer, strengths, other_talents, student_id,
+        SELECT qq, name, {college_expression} AS college, {group_card_expression} AS group_card,
+               {campus_expression} AS campus, {major_expression} AS major,
+               gender, departments_json, transfer, strengths, other_talents, student_id,
                {submitted_at_expression} AS submitted_at
         FROM submissions
         ORDER BY {order_by}
@@ -83,6 +95,10 @@ def export_submissions(database: Path, output: Path) -> int:
                     row["qq"],
                     row["name"],
                     row["student_id"],
+                    MEDICAL_COLLEGE if row["college"] == LEGACY_MEDICAL_COLLEGE else row["college"],
+                    row["group_card"],
+                    row["campus"],
+                    row["major"],
                     row["gender"],
                     *department_columns,
                     row["transfer"],

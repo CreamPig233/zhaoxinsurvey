@@ -251,13 +251,16 @@ ol { margin: 0; padding-left: 20px; }
 .submissions-section { padding-top: 68px; }
 .admin-section-heading { margin-bottom: 28px; }
 .admin-table-wrap { margin-top: 18px; overflow-x: auto; background: var(--white); border: 1px solid #d2d2d7; border-radius: 8px; }
-.admin-table { width: 100%; min-width: 1120px; border-collapse: collapse; table-layout: fixed; }
+.admin-table { width: 100%; min-width: 1460px; border-collapse: collapse; table-layout: fixed; }
 .admin-table th { padding: 16px 18px; color: var(--muted); background: var(--pearl); border-bottom: 1px solid var(--hairline); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; font-weight: 400; letter-spacing: .7px; text-align: left; text-transform: uppercase; }
-.admin-table th:nth-child(1) { width: 170px; }
-.admin-table th:nth-child(2) { width: 64px; }
-.admin-table th:nth-child(3) { width: 205px; }
-.admin-table th:nth-child(4) { width: 95px; }
-.admin-table th:nth-child(7) { width: 155px; }
+.admin-table th:nth-child(1) { width: 126px; }
+.admin-table th:nth-child(2) { width: 170px; }
+.admin-table th:nth-child(3) { width: 150px; }
+.admin-table th:nth-child(4) { width: 145px; }
+.admin-table th:nth-child(5) { width: 64px; }
+.admin-table th:nth-child(7) { width: 95px; }
+.admin-table th:nth-child(8) { width: 250px; }
+.admin-table th:nth-child(9) { width: 155px; }
 .admin-table td { padding: 20px 18px; color: var(--ink); border-bottom: 1px solid var(--hairline); font-size: 14px; line-height: 1.5; vertical-align: top; letter-spacing: 0; }
 .admin-table tbody tr:last-child td { border-bottom: 0; }
 .admin-table tbody tr:hover { background: #f7f7f9; }
@@ -268,6 +271,24 @@ ol { margin: 0; padding-left: 20px; }
 .table-long-text { max-height: 160px; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 .submitted-time { color: var(--muted) !important; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px !important; }
 .table-state { padding: 64px 20px !important; color: var(--muted) !important; text-align: center; }
+.annotation-cell { white-space: nowrap; }
+.annotation-buttons { display: flex; gap: 8px; }
+.annotation-button { position: relative; width: 42px; height: 36px; padding: 0; color: var(--muted); background: var(--pearl); border: 1px solid #d2d2d7; border-radius: 9px; font-size: 19px; line-height: 1; }
+.annotation-button:hover { color: var(--blue); border-color: var(--blue); background: #f4f8fd; }
+.annotation-button strong { position: absolute; top: -8px; right: -7px; min-width: 18px; height: 18px; padding: 1px 4px; color: var(--white); background: var(--blue); border: 2px solid var(--white); border-radius: 999px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; font-weight: 500; line-height: 14px; }
+.annotation-dialog { width: min(620px, calc(100% - 32px)); max-height: min(760px, calc(100% - 32px)); padding: 0; color: var(--ink); background: var(--white); border: 0; border-radius: 18px; }
+.annotation-dialog::backdrop { background: rgba(0, 0, 0, .48); backdrop-filter: blur(8px); }
+.annotation-dialog .dialog-inner { padding: 42px; }
+.annotation-dialog h2 { margin-bottom: 8px; }
+.annotation-person { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+.annotation-records { max-height: 390px; padding: 4px 0; overflow: auto; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); }
+.annotation-record { padding: 16px 0; border-bottom: 1px solid var(--hairline); }
+.annotation-record:last-child { border-bottom: 0; }
+.annotation-record-content { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; font-size: 15px; line-height: 1.55; }
+.annotation-record-meta { margin: 0; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; line-height: 1.5; }
+.annotation-empty { margin: 0; padding: 42px 0; color: var(--muted); text-align: center; font-size: 14px; }
+.annotation-form { margin-top: 24px; }
+.annotation-form textarea { min-height: 120px; }
 
 @media (max-width: 900px) {
   .admin-shell { padding-right: 24px; padding-left: 24px; }
@@ -290,4 +311,5 @@ ol { margin: 0; padding-left: 20px; }
   .submissions-section { padding-top: 48px; }
   .admin-section-heading { gap: 14px; }
   .admin-table-wrap { margin-right: -18px; margin-left: -18px; border-right: 0; border-left: 0; border-radius: 0; }
+  .annotation-dialog .dialog-inner { padding: 34px 22px 24px; }
 }

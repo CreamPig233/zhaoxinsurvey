@@ -22,8 +22,10 @@ from threading import Lock
 
 
 BASE_DIR = Path(__file__).resolve().parent
-CSV_PATH = BASE_DIR / "data//realname_members.csv"
-CSV_HAS_HEADER = False
+CSV_PATH = BASE_DIR / "users.csv"
+CSV_HAS_HEADER = True
+LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+MEDICAL_COLLEGE = "医学与生物信息工程学院"
 SHARED_SECRET = "REMOTE_USERS_CSV_SHARED_SECRET"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = "25565"
@@ -41,20 +43,22 @@ def auth_signature(secret: str, method: str, path: str, timestamp: str, nonce: s
     return hmac.new(secret.encode("utf-8"), material, hashlib.sha256).hexdigest()
 
 
-def load_users() -> dict[str, tuple[str, str]]:
-    users: dict[str, tuple[str, str]] = {}
+def load_users() -> dict[str, dict[str, str]]:
+    users: dict[str, dict[str, str]] = {}
     if not CSV_PATH.is_file():
         return users
     with CSV_PATH.open("r", encoding="utf-8-sig", newline="") as file:
-        rows = csv.reader(file)
-        if CSV_HAS_HEADER:
-            next(rows, None)
+        rows = csv.DictReader(file)
         for row in rows:
-            if len(row) < 3:
-                continue
-            qq, student_id, name = (cell.strip() for cell in row[:3])
+            qq = (row.get("QQ号") or "").strip()
+            student_id = (row.get("学号") or "").strip()
+            name = (row.get("姓名") or "").strip()
+            college = (row.get("学院") or "").strip()
+            college = MEDICAL_COLLEGE if college == LEGACY_MEDICAL_COLLEGE else college
+            # The source file currently uses 群名片; accept the earlier QQ群名片 spelling too.
+            group_card = (row.get("QQ群名片") or row.get("群名片") or "").strip()
             if qq:
-                users[qq] = (student_id, name)
+                users[qq] = {"student_id": student_id, "name": name, "college": college, "group_card": group_card}
     return users
 
 
@@ -154,8 +158,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if qq not in users:
             result = {"known": False, "reason": "qq_not_found"}
         else:
-            expected_student, name = users[qq]
-            result = {"known": True, "expected_student": expected_student, "name": name}
+            user = users[qq]
+            expected_student, name = user["student_id"], user["name"]
+            result = {"known": True, "expected_student": expected_student, "name": name, "college": user["college"], "group_card": user["group_card"]}
             if not expected_student:
                 result["reason"] = "student_missing"
             elif student_id != expected_student:

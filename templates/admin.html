@@ -37,12 +37,29 @@
       <p id="admin-error" class="form-error" role="alert"></p>
       <div class="admin-table-wrap">
         <table class="admin-table">
-          <thead><tr><th scope="col">报名人</th><th scope="col">性别</th><th scope="col">部门志愿</th><th scope="col">服从调剂</th><th scope="col">个人优势及未来工作设想</th><th scope="col">其它特长</th><th scope="col">提交时间</th></tr></thead>
-          <tbody id="submissions-body"><tr><td colspan="7" class="table-state">正在读取报名数据…</td></tr></tbody>
+          <thead><tr><th scope="col">操作</th><th scope="col">报名人</th><th scope="col">学院</th><th scope="col">校区</th><th scope="col">QQ群名片</th><th scope="col">专业</th><th scope="col">性别</th><th scope="col">部门志愿</th><th scope="col">服从调剂</th><th scope="col">个人优势及未来工作设想</th><th scope="col">其它特长</th><th scope="col">提交时间</th></tr></thead>
+          <tbody id="submissions-body"><tr><td colspan="12" class="table-state">正在读取报名数据…</td></tr></tbody>
         </table>
       </div>
     </section>
   </main>
+
+  <dialog id="annotation-dialog" class="annotation-dialog" aria-labelledby="annotation-title">
+    <div class="dialog-inner">
+      <button id="annotation-close" class="icon-button" type="button" aria-label="关闭">×</button>
+      <p id="annotation-kicker" class="eyebrow">ANNOTATIONS</p>
+      <h2 id="annotation-title">记录</h2>
+      <p id="annotation-person" class="annotation-person"></p>
+      <div id="annotation-records" class="annotation-records"></div>
+      <form id="annotation-form" class="annotation-form" hidden>
+        <label for="annotation-input" id="annotation-input-label">内容</label>
+        <textarea id="annotation-input" maxlength="1000" rows="5" required></textarea>
+        <p id="annotation-form-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button id="annotation-cancel" class="pill-button" type="button">取消</button><button class="pill-button filled" type="submit">保存</button></div>
+      </form>
+      <div id="annotation-actions" class="dialog-actions"><button id="annotation-add" class="pill-button filled" type="button">添加</button></div>
+    </div>
+  </dialog>
 
   <script>
     const searchInput = document.querySelector('#search-input');
@@ -96,16 +113,35 @@
       document.querySelector('#status-detail').textContent = `最后读取 ${formatTime(new Date().toISOString().slice(0, 19))}`;
     }
 
+    const annotationDialog = document.querySelector('#annotation-dialog');
+    const annotationRecords = document.querySelector('#annotation-records');
+    const annotationForm = document.querySelector('#annotation-form');
+    const annotationInput = document.querySelector('#annotation-input');
+    const annotationFormError = document.querySelector('#annotation-form-error');
+    let activeAnnotation = {studentId: '', type: 'star', item: null};
+
+    function annotationButtons(item) {
+      return `<div class="annotation-buttons">
+        <button class="annotation-button" type="button" data-annotation-type="star" data-student-id="${escapeHTML(item.student_id)}" aria-label="查看星标" title="星标"><span aria-hidden="true">★</span>${item.star_count ? `<strong>${item.star_count}</strong>` : ''}</button>
+        <button class="annotation-button" type="button" data-annotation-type="comment" data-student-id="${escapeHTML(item.student_id)}" aria-label="查看批注" title="批注"><span aria-hidden="true">▱</span>${item.comment_count ? `<strong>${item.comment_count}</strong>` : ''}</button>
+      </div>`;
+    }
+
     function renderRows() {
       const keyword = searchInput.value.trim().toLowerCase();
-      const visible = submissions.filter(item => [item.name, item.student_id, item.qq].some(value => String(value).toLowerCase().includes(keyword)));
+      const visible = submissions.filter(item => [item.name, item.student_id, item.qq, item.college, item.campus, item.group_card, item.major].some(value => String(value).toLowerCase().includes(keyword)));
       document.querySelector('#result-summary').textContent = keyword ? `显示 ${visible.length} / ${submissions.length} 条记录` : `共 ${submissions.length} 条记录，按最近提交时间排列`;
       if (!visible.length) {
-        submissionsBody.innerHTML = `<tr><td colspan="7" class="table-state">${keyword ? '没有匹配的报名记录' : '暂时还没有报名记录'}</td></tr>`;
+        submissionsBody.innerHTML = `<tr><td colspan="12" class="table-state">${keyword ? '没有匹配的报名记录' : '暂时还没有报名记录'}</td></tr>`;
         return;
       }
       submissionsBody.innerHTML = visible.map(item => `<tr>
+        <td data-label="操作" class="annotation-cell">${annotationButtons(item)}</td>
         <td data-label="报名人"><div class="applicant-name">${escapeHTML(item.name)}</div><div class="applicant-meta">学号 ${escapeHTML(item.student_id)} · QQ ${escapeHTML(item.qq)}</div></td>
+        <td data-label="学院">${escapeHTML(item.college) || '—'}</td>
+        <td data-label="校区">${escapeHTML(item.campus) || '未知'}</td>
+        <td data-label="QQ群名片">${escapeHTML(item.group_card) || '—'}</td>
+        <td data-label="专业">${escapeHTML(item.major) || '—'}</td>
         <td data-label="性别">${escapeHTML(item.gender)}</td>
         <td data-label="部门志愿"><ol class="department-order">${item.departments.map(department => `<li>${escapeHTML(department)}</li>`).join('')}</ol></td>
         <td data-label="服从调剂">${escapeHTML(item.transfer)}</td>
@@ -113,7 +149,80 @@
         <td data-label="其它特长"><p class="table-long-text">${escapeHTML(item.other_talents) || '—'}</p></td>
         <td data-label="提交时间" class="submitted-time">${escapeHTML(formatTime(item.submitted_at))}</td>
       </tr>`).join('');
+      submissionsBody.querySelectorAll('[data-annotation-type]').forEach(button => button.addEventListener('click', () => openAnnotations(button.dataset.studentId, button.dataset.annotationType)));
     }
+
+    function renderAnnotationRecords(records, type) {
+      const label = type === 'star' ? '星标原因' : '批注内容';
+      if (!records.length) {
+        annotationRecords.innerHTML = `<p class="annotation-empty">暂无${type === 'star' ? '星标' : '批注'}记录</p>`;
+        return;
+      }
+      annotationRecords.innerHTML = records.slice().reverse().map(record => `<article class="annotation-record">
+        <p class="annotation-record-content">${escapeHTML(record.content)}</p>
+        <p class="annotation-record-meta">${label} · ${escapeHTML(record.operator)} · ${escapeHTML(formatTime(record.created_at))}</p>
+      </article>`).join('');
+    }
+
+    async function openAnnotations(studentId, type) {
+      const item = submissions.find(entry => entry.student_id === studentId);
+      if (!item) return;
+      activeAnnotation = {studentId, type, item};
+      annotationForm.hidden = true;
+      document.querySelector('#annotation-actions').hidden = false;
+      document.querySelector('#annotation-title').textContent = type === 'star' ? '星标记录' : '批注记录';
+      document.querySelector('#annotation-person').textContent = `${item.name} · 学号 ${item.student_id}`;
+      annotationRecords.innerHTML = '<p class="annotation-empty">正在读取记录…</p>';
+      annotationDialog.showModal();
+      try {
+        const {response, data} = await apiJSON(`/api/admin/annotations/${encodeURIComponent(studentId)}`);
+        if (response.status === 401) return location.href = '/login';
+        if (!response.ok || !data.ok) throw new Error(data.error || '记录读取失败。');
+        renderAnnotationRecords(type === 'star' ? data.stars : data.comments, type);
+      } catch (error) {
+        logClientError('读取星标批注失败', {error});
+        annotationRecords.innerHTML = `<p class="annotation-empty">${escapeHTML(error.message || '记录读取失败。')}</p>`;
+      }
+    }
+
+    function showAnnotationForm() {
+      annotationForm.hidden = false;
+      document.querySelector('#annotation-actions').hidden = true;
+      document.querySelector('#annotation-input-label').textContent = activeAnnotation.type === 'star' ? '星标原因' : '批注内容';
+      annotationInput.placeholder = activeAnnotation.type === 'star' ? '请输入星标原因' : '请输入批注内容';
+      annotationInput.value = '';
+      annotationFormError.textContent = '';
+      annotationInput.focus();
+    }
+
+    annotationForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const value = annotationInput.value.trim();
+      if (!value) { annotationFormError.textContent = '内容不能为空。'; return; }
+      const submitButton = annotationForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      annotationFormError.textContent = '';
+      try {
+        const payload = activeAnnotation.type === 'star' ? {type: 'star', reason: value} : {type: 'comment', content: value};
+        const {response, data} = await apiJSON(`/api/admin/annotations/${encodeURIComponent(activeAnnotation.studentId)}`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf}, body: JSON.stringify(payload)});
+        if (response.status === 401) return location.href = '/login';
+        if (!response.ok || !data.ok) throw new Error(data.error || '保存失败。');
+        const item = submissions.find(entry => entry.student_id === activeAnnotation.studentId);
+        if (item) { item.star_count = data.star_count; item.comment_count = data.comment_count; }
+        renderAnnotationRecords(activeAnnotation.type === 'star' ? data.stars : data.comments, activeAnnotation.type);
+        annotationForm.hidden = true;
+        document.querySelector('#annotation-actions').hidden = false;
+        renderRows();
+      } catch (error) {
+        logClientError('保存星标批注失败', {error});
+        annotationFormError.textContent = error.message || '保存失败，请稍后重试。';
+      } finally { submitButton.disabled = false; }
+    });
+
+    document.querySelector('#annotation-add').addEventListener('click', showAnnotationForm);
+    document.querySelector('#annotation-cancel').addEventListener('click', () => { annotationForm.hidden = true; document.querySelector('#annotation-actions').hidden = false; });
+    document.querySelector('#annotation-close').addEventListener('click', () => annotationDialog.close());
+    annotationDialog.addEventListener('click', event => { if (event.target === annotationDialog) annotationDialog.close(); });
 
     async function loadSubmissions() {
       refreshButton.disabled = true;
@@ -130,7 +239,7 @@
         logClientError('读取报名数据失败', {error});
         document.querySelector('#data-status').textContent = '读取失败';
         document.querySelector('#status-detail').textContent = '请稍后重试';
-        submissionsBody.innerHTML = '<tr><td colspan="7" class="table-state">报名数据读取失败，请点击“刷新”重试。</td></tr>';
+        submissionsBody.innerHTML = '<tr><td colspan="12" class="table-state">报名数据读取失败，请点击“刷新”重试。</td></tr>';
         errorEl.textContent = error.message || '报名数据读取失败。';
       } finally {
         refreshButton.disabled = false;

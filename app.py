@@ -8,6 +8,7 @@ import html
 import hmac
 import json
 import logging
+import msvcrt
 from logging.handlers import RotatingFileHandler
 import mimetypes
 import os
@@ -31,9 +32,10 @@ from wsgiref.simple_server import WSGIRequestHandler, WSGIServer
 DEADLINE = datetime(2026, 9, 29, 12, 0, 0)
 BASE_DIR = Path(__file__).resolve().parent
 CSV_PATH = BASE_DIR / "users.csv"
+COLLEGE_MAJORS_PATH = BASE_DIR / "college_majors.json"
 DATABASE_PATH = BASE_DIR / "data" / "survey.sqlite3"
 LOG_PATH = BASE_DIR / "logs" / "app.log"
-CSV_HAS_HEADER = False
+CSV_HAS_HEADER = True
 USE_LOCAL_USERS_CSV =True
 REMOTE_USERS_CSV_SERVER = "45.125.44.183:10090"
 REMOTE_USERS_CSV_SHARED_SECRET = "REMOTE_USERS_CSV_SHARED_SECRET"
@@ -55,9 +57,51 @@ DEPARTMENTS = [
     "基础事务站 - 美工部",
     "基础事务站 - 推广部",
 ]
+
+CAMPUS_BY_COLLEGE = {
+    "南湖校区": {
+        "外国语学院", "艺术学院", "理学院", "资源与土木工程学院", "冶金学院",
+        "材料科学与工程学院", "机械工程与自动化学院", "信息科学与工程学院",
+        "体育部", "国家卓越工程师学院",
+    },
+    "浑南校区": {
+        "文法学院", "马克思主义学院", "工商管理学院", "计算机科学与工程学院", "软件学院",
+        "医学与生物信息工程学院", "生命科学与健康学院", "江河建筑学院",
+        "机器人科学与工程学院", "未来技术学院",
+    },
+}
+LEGACY_MEDICAL_COLLEGE = "医学与生物信息工程学院（原中荷生物医学与信息工程学院）"
+MEDICAL_COLLEGE = "医学与生物信息工程学院"
 SESSIONS: dict[str, dict] = {}
 RATE_BUCKETS: dict[str, list[float]] = {}
 STATE_LOCK = Lock()
+
+
+def load_college_majors() -> tuple[dict[str, tuple[str, ...]], object]:
+    """Load the major mapping once and hold the source file open for this process."""
+    mapping_file = COLLEGE_MAJORS_PATH.open("r", encoding="utf-8")
+    try:
+        msvcrt.locking(mapping_file.fileno(), msvcrt.LK_NBLCK, 1)
+        raw_mapping = json.load(mapping_file)
+    except Exception:
+        mapping_file.close()
+        raise
+    if not isinstance(raw_mapping, dict):
+        mapping_file.close()
+        raise ValueError("college_majors.json must contain an object")
+    mapping: dict[str, tuple[str, ...]] = {}
+    for college, majors in raw_mapping.items():
+        if not isinstance(college, str) or not isinstance(majors, list) or not all(isinstance(major, str) and major for major in majors):
+            mapping_file.close()
+            raise ValueError("college_majors.json contains invalid entries")
+        mapping[college] = tuple(majors)
+    if mapping.get("未知") != ("未知",):
+        mapping_file.close()
+        raise ValueError("college_majors.json must define 未知: [未知]")
+    return mapping, mapping_file
+
+
+COLLEGE_MAJORS, COLLEGE_MAJORS_FILE = load_college_majors()
 
 
 def configure_logging() -> logging.Logger:
@@ -150,6 +194,21 @@ def user_agent(environ: dict) -> str:
     return environ.get("HTTP_USER_AGENT", "")[:512]
 
 
+def campus_for_college(college: str) -> str:
+    for campus, colleges in CAMPUS_BY_COLLEGE.items():
+        if college in colleges:
+            return campus
+    return "未知"
+
+
+def normalize_college(college: str) -> str:
+    return MEDICAL_COLLEGE if college == LEGACY_MEDICAL_COLLEGE else college
+
+
+def majors_for_college(college: str) -> tuple[str, ...]:
+    return COLLEGE_MAJORS.get(college, ("其他",))
+
+
 def db_connect() -> sqlite3.Connection:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH, timeout=10.0)
@@ -167,6 +226,10 @@ def init_db() -> None:
                 student_id TEXT PRIMARY KEY,
                 qq TEXT NOT NULL,
                 name TEXT NOT NULL,
+                college TEXT NOT NULL DEFAULT '',
+                group_card TEXT NOT NULL DEFAULT '',
+                campus TEXT NOT NULL DEFAULT '未知',
+                major TEXT NOT NULL DEFAULT '',
                 gender TEXT NOT NULL CHECK (gender IN ('男', '女')),
                 departments_json TEXT NOT NULL,
                 transfer TEXT NOT NULL CHECK (transfer IN ('是', '否')),
@@ -204,26 +267,49 @@ def init_db() -> None:
                 content_hash TEXT NOT NULL,
                 created_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS admin_annotations (
+                student_id TEXT PRIMARY KEY,
+                stars_json TEXT NOT NULL DEFAULT '[]',
+                comments_json TEXT NOT NULL DEFAULT '[]',
+                updated_at TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_request_dedup_student_time
                 ON request_dedup(student_id, created_at);
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(submissions)")}
+        if "college" not in columns:
+            conn.execute("ALTER TABLE submissions ADD COLUMN college TEXT NOT NULL DEFAULT ''")
+        if "group_card" not in columns:
+            conn.execute("ALTER TABLE submissions ADD COLUMN group_card TEXT NOT NULL DEFAULT ''")
+        if "campus" not in columns:
+            conn.execute("ALTER TABLE submissions ADD COLUMN campus TEXT NOT NULL DEFAULT '未知'")
+        if "major" not in columns:
+            conn.execute("ALTER TABLE submissions ADD COLUMN major TEXT NOT NULL DEFAULT ''")
+        conn.execute("UPDATE submissions SET college = ? WHERE college = ?", (MEDICAL_COLLEGE, LEGACY_MEDICAL_COLLEGE))
+        for campus, colleges in CAMPUS_BY_COLLEGE.items():
+            placeholders = ", ".join("?" for _ in colleges)
+            conn.execute(
+                f"UPDATE submissions SET campus = ? WHERE college IN ({placeholders})",
+                (campus, *colleges),
+            )
 
 
-def load_users() -> dict[str, tuple[str, str]]:
-    users: dict[str, tuple[str, str]] = {}
+def load_users() -> dict[str, dict[str, str]]:
+    users: dict[str, dict[str, str]] = {}
     if not CSV_PATH.is_file():
         return users
     with CSV_PATH.open("r", encoding="utf-8-sig", newline="") as file:
-        rows = csv.reader(file)
-        if CSV_HAS_HEADER:
-            next(rows, None)
+        rows = csv.DictReader(file)
         for row in rows:
-            if len(row) < 3:
-                continue
-            qq, student_id, name = (cell.strip() for cell in row[:3])
+            qq = (row.get("QQ号") or "").strip()
+            student_id = (row.get("学号") or "").strip()
+            name = (row.get("姓名") or "").strip()
+            college = normalize_college((row.get("学院") or "").strip())
+            # The source file currently uses 群名片; accept the earlier QQ群名片 spelling too.
+            group_card = (row.get("QQ群名片") or row.get("群名片") or "").strip()
             if qq:
-                users[qq] = (student_id, name)
+                users[qq] = {"student_id": student_id, "name": name, "college": college, "group_card": group_card}
     return users
 
 
@@ -231,7 +317,7 @@ def is_admin_user(qq: str, authenticated_name: str = "") -> bool:
     """Determine admin access from the name stored in users.csv."""
     local_user = load_users().get(qq)
     if local_user:
-        return local_user[1].startswith("管理员")
+        return local_user["name"].startswith("管理员")
     return USE_LOCAL_USERS_CSV and authenticated_name.startswith("管理员")
 
 
@@ -240,13 +326,53 @@ def admin_submission(row: sqlite3.Row) -> dict:
         "qq": row["qq"],
         "name": row["name"],
         "student_id": row["student_id"],
+        "college": row["college"],
+        "group_card": row["group_card"],
+        "campus": row["campus"],
+        "major": row["major"],
         "gender": row["gender"],
         "departments": json.loads(row["departments_json"]),
         "transfer": row["transfer"],
         "strengths": row["strengths"],
         "other_talents": row["other_talents"],
+        "major": row["major"],
         "submitted_at": row["submitted_at"],
+        "star_count": len(parse_annotation_list(row["stars_json"])),
+        "comment_count": len(parse_annotation_list(row["comments_json"])),
     }
+
+
+def parse_annotation_list(value: str) -> list[dict]:
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def get_admin_annotations(conn: sqlite3.Connection, student_id: str) -> dict:
+    row = conn.execute(
+        "SELECT stars_json, comments_json FROM admin_annotations WHERE student_id = ?",
+        (student_id,),
+    ).fetchone()
+    stars = parse_annotation_list(row["stars_json"]) if row else []
+    comments = parse_annotation_list(row["comments_json"]) if row else []
+    return {"stars": stars, "comments": comments, "star_count": len(stars), "comment_count": len(comments)}
+
+
+def normalized_annotation(body: dict, annotation_type: str) -> tuple[str | None, str | None]:
+    field = "reason" if annotation_type == "star" else "content"
+    value = body.get(field)
+    if not isinstance(value, str):
+        return None, "内容格式无效。"
+    value = value.strip()
+    if not value:
+        return None, "内容不能为空。"
+    if len(value) > 1000 or "\x00" in value:
+        return None, "内容不能超过 1000 个字符。"
+    return value, None
 
 
 def auth_signature(secret: str, method: str, path: str, timestamp: str, nonce: str, body: bytes, status: int | None = None) -> str:
@@ -330,6 +456,8 @@ def verify_remote_user(qq: str, student_id: str) -> dict:
             "known": bool(payload.get("known")),
             "expected_student": str(payload.get("expected_student", ""))[:64],
             "name": str(payload.get("name", ""))[:128],
+            "college": str(payload.get("college", ""))[:128],
+            "group_card": str(payload.get("group_card", ""))[:128],
             "reason": reason,
         }
     except (ConnectionError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
@@ -461,11 +589,14 @@ def decode_strengths(value) -> str | None:
 
 
 def normalized_submission(body: dict, session: dict) -> tuple[dict | None, str | None]:
+    major = body.get("major")
     gender = body.get("gender")
     transfer = body.get("transfer")
     departments = body.get("departments")
     strengths = decode_strengths(body.get("strengths_b64", ""))
     other_talents = decode_strengths(body.get("other_talents_b64", ""))
+    if not isinstance(major, str) or major not in majors_for_college(session["college"]):
+        return None, "请选择与学院相符的专业。"
     if gender not in ("男", "女"):
         return None, "请选择性别。"
     if transfer not in ("是", "否"):
@@ -480,6 +611,10 @@ def normalized_submission(body: dict, session: dict) -> tuple[dict | None, str |
         "name": session["name"],
         "student_id": session["student_id"],
         "qq": session["qq"],
+        "college": session["college"],
+        "group_card": session["group_card"],
+        "campus": session["campus"],
+        "major": major,
         "gender": gender,
         "departments": departments,
         "transfer": transfer,
@@ -497,6 +632,7 @@ def public_submission(row: sqlite3.Row | None) -> dict | None:
     if not row:
         return None
     return {
+        "major": row["major"],
         "gender": row["gender"],
         "departments": json.loads(row["departments_json"]),
         "transfer": row["transfer"],
@@ -537,15 +673,15 @@ def save_submission(record: dict, request_id: str):
             (request_id, record["student_id"], fingerprint, current_time),
         )
         conn.execute(
-            """INSERT INTO submissions(student_id, qq, name, gender, departments_json, transfer, strengths, other_talents, submitted_at, request_id, content_hash)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(student_id) DO UPDATE SET qq=excluded.qq, name=excluded.name, gender=excluded.gender,
+            """INSERT INTO submissions(student_id, qq, name, college, group_card, campus, major, gender, departments_json, transfer, strengths, other_talents, submitted_at, request_id, content_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(student_id) DO UPDATE SET qq=excluded.qq, name=excluded.name, college=excluded.college, group_card=excluded.group_card, campus=excluded.campus, major=excluded.major, gender=excluded.gender,
                departments_json=excluded.departments_json, transfer=excluded.transfer, strengths=excluded.strengths,
                other_talents=excluded.other_talents,
                submitted_at=excluded.submitted_at, request_id=excluded.request_id, content_hash=excluded.content_hash""",
-            (record["student_id"], record["qq"], record["name"], record["gender"], json.dumps(record["departments"], ensure_ascii=False), record["transfer"], record["strengths"], record["other_talents"], submitted_at, request_id, fingerprint),
+            (record["student_id"], record["qq"], record["name"], record["college"], record["group_card"], record["campus"], record["major"], record["gender"], json.dumps(record["departments"], ensure_ascii=False), record["transfer"], record["strengths"], record["other_talents"], submitted_at, request_id, fingerprint),
         )
-        after = {key: record[key] for key in ("gender", "departments", "transfer", "strengths", "other_talents")}
+        after = {key: record[key] for key in ("major", "gender", "departments", "transfer", "strengths", "other_talents")}
         conn.execute(
             "INSERT INTO change_logs(student_id, operator, changed_at, before_json, after_json) VALUES (?, ?, ?, ?, ?)",
             (record["student_id"], record["student_id"], submitted_at, json.dumps(before, ensure_ascii=False) if before else None, json.dumps(after, ensure_ascii=False)),
@@ -588,7 +724,7 @@ def _application(environ: dict, start_response):
         start_response(f"{status} Not Found", headers)
         return [body]
 
-    if deadline_passed() and path not in {"/admin", "/api/admin/submissions"}:
+    if deadline_passed() and path not in {"/admin", "/api/admin/submissions"} and not path.startswith("/api/admin/annotations/"):
         if path.startswith("/api/"):
             status, headers, body = json_response({"ok": False, "error": "报名已截止。"}, 410)
         else:
@@ -614,7 +750,7 @@ def _application(environ: dict, start_response):
                 remote_result = verify_remote_user(qq, student_id)
                 remote_error = remote_result.get("error")
                 if not remote_error and remote_result.get("known"):
-                    users[qq] = (remote_result.get("expected_student", ""), remote_result.get("name", ""))
+                    users[qq] = {"student_id": remote_result.get("expected_student", ""), "name": remote_result.get("name", ""), "college": normalize_college(remote_result.get("college", "")), "group_card": remote_result.get("group_card", "")}
             if not qq or len(qq) > 32 or len(student_id) > 32:
                 reason = "invalid_input"
                 environ["login_reason"] = reason
@@ -629,7 +765,8 @@ def _application(environ: dict, start_response):
                 log_login(environ, qq, student_id, None, "failure", "qq_not_found")
                 status, headers, body = json_response({"ok": False, "error": "请加入招新 QQ 群 810192062 后继续。"}, 403)
             else:
-                expected_student, name = users[qq]
+                user = users[qq]
+                expected_student, name = user["student_id"], user["name"]
                 if not expected_student:
                     environ["login_reason"] = "student_missing"
                     log_login(environ, qq, student_id, name, "failure", "student_missing")
@@ -644,10 +781,11 @@ def _application(environ: dict, start_response):
                     csrf = secrets.token_urlsafe(24)
                     is_admin = is_admin_user(qq, name)
                     with STATE_LOCK:
-                        SESSIONS[token] = {"qq": qq, "student_id": expected_student, "name": name, "is_admin": is_admin, "csrf": csrf, "created_at": now()}
+                        campus = campus_for_college(user["college"])
+                        SESSIONS[token] = {"qq": qq, "student_id": expected_student, "name": name, "college": user["college"], "group_card": user["group_card"], "campus": campus, "is_admin": is_admin, "csrf": csrf, "created_at": now()}
                     log_login(environ, qq, expected_student, name, "success", "ok")
                     status, headers, body = json_response(
-                        {"ok": True, "name": name, "qq": qq, "student_id": expected_student, "csrf": csrf, "is_admin": is_admin},
+                        {"ok": True, "name": name, "qq": qq, "student_id": expected_student, "college": user["college"], "group_card": user["group_card"], "campus": campus, "csrf": csrf, "is_admin": is_admin},
                         extra_headers=[("Set-Cookie", "survey_session=" + token + "; HttpOnly; SameSite=Lax; Path=/")],
                     )
     elif path == "/admin" and method == "GET":
@@ -667,14 +805,70 @@ def _application(environ: dict, start_response):
         else:
             with db_connect() as conn:
                 rows = conn.execute(
-                    "SELECT qq, name, student_id, gender, departments_json, transfer, strengths, other_talents, submitted_at "
-                    "FROM submissions ORDER BY submitted_at DESC, student_id ASC"
+                    "SELECT s.qq, s.name, s.student_id, s.college, s.group_card, s.campus, s.major, s.gender, s.departments_json, s.transfer, s.strengths, s.other_talents, s.submitted_at, "
+                    "COALESCE(a.stars_json, '[]') AS stars_json, COALESCE(a.comments_json, '[]') AS comments_json "
+                    "FROM submissions AS s LEFT JOIN admin_annotations AS a ON a.student_id = s.student_id "
+                    "ORDER BY s.submitted_at DESC, s.student_id ASC"
                 ).fetchall()
             submissions = [admin_submission(row) for row in rows]
             latest_submitted_at = submissions[0]["submitted_at"] if submissions else None
             status, headers, body = json_response(
                 {"ok": True, "count": len(submissions), "latest_submitted_at": latest_submitted_at, "submissions": submissions}
             )
+    elif path.startswith("/api/admin/annotations/") and method == "GET":
+        _, session = session_from_request(environ)
+        student_id = path.removeprefix("/api/admin/annotations/")
+        if not session:
+            status, headers, body = json_response({"ok": False, "error": "登录已失效，请重新登录。"}, 401)
+        elif not session.get("is_admin"):
+            status, headers, body = json_response({"ok": False, "error": "无权访问管理员数据。"}, 403)
+        elif not student_id or len(student_id) > 64:
+            status, headers, body = json_response({"ok": False, "error": "学号无效。"}, 400)
+        else:
+            with db_connect() as conn:
+                exists = conn.execute("SELECT 1 FROM submissions WHERE student_id = ?", (student_id,)).fetchone()
+                if not exists:
+                    status, headers, body = json_response({"ok": False, "error": "未找到该报名记录。"}, 404)
+                else:
+                    status, headers, body = json_response({"ok": True, "student_id": student_id, **get_admin_annotations(conn, student_id)})
+    elif path.startswith("/api/admin/annotations/") and method == "POST":
+        session, auth_error = require_session(environ)
+        student_id = path.removeprefix("/api/admin/annotations/")
+        if auth_error:
+            status, headers, body = auth_error
+        elif not session.get("is_admin"):
+            status, headers, body = json_response({"ok": False, "error": "无权添加管理员批注。"}, 403)
+        elif not student_id or len(student_id) > 64:
+            status, headers, body = json_response({"ok": False, "error": "学号无效。"}, 400)
+        else:
+            request = parse_body(environ)
+            annotation_type = request.get("type")
+            if not isinstance(annotation_type, str) or annotation_type not in {"star", "comment"}:
+                status, headers, body = json_response({"ok": False, "error": "批注类型无效。"}, 400)
+            else:
+                value, error = normalized_annotation(request, annotation_type)
+                if error:
+                    status, headers, body = json_response({"ok": False, "error": error}, 400)
+                else:
+                    record = {"content": value, "operator": session["name"], "created_at": iso_now()}
+                    with db_connect() as conn:
+                        exists = conn.execute("SELECT 1 FROM submissions WHERE student_id = ?", (student_id,)).fetchone()
+                        if not exists:
+                            status, headers, body = json_response({"ok": False, "error": "未找到该报名记录。"}, 404)
+                        else:
+                            # Serialize read-modify-write updates so two admins cannot overwrite each other.
+                            conn.execute("BEGIN IMMEDIATE")
+                            current = get_admin_annotations(conn, student_id)
+                            key = "stars" if annotation_type == "star" else "comments"
+                            current[key].append(record)
+                            if len(current[key]) > 500:
+                                current[key] = current[key][-500:]
+                            conn.execute(
+                                "INSERT INTO admin_annotations(student_id, stars_json, comments_json, updated_at) VALUES (?, ?, ?, ?) "
+                                "ON CONFLICT(student_id) DO UPDATE SET stars_json=excluded.stars_json, comments_json=excluded.comments_json, updated_at=excluded.updated_at",
+                                (student_id, json.dumps(current["stars"], ensure_ascii=False), json.dumps(current["comments"], ensure_ascii=False), iso_now()),
+                            )
+                            status, headers, body = json_response({"ok": True, "student_id": student_id, **get_admin_annotations(conn, student_id)}, 201)
     elif path == "/questionnaire" and method == "GET":
         _, session = session_from_request(environ)
         if not session:
@@ -698,7 +892,7 @@ def _application(environ: dict, start_response):
         else:
             with db_connect() as conn:
                 row = conn.execute("SELECT * FROM submissions WHERE student_id = ?", (session["student_id"],)).fetchone()
-            status, headers, body = json_response({"ok": True, "name": session["name"], "qq": session["qq"], "student_id": session["student_id"], "csrf": session["csrf"], "is_admin": bool(session.get("is_admin")), "submission": public_submission(row)})
+            status, headers, body = json_response({"ok": True, "name": session["name"], "qq": session["qq"], "student_id": session["student_id"], "college": session["college"], "group_card": session["group_card"], "campus": session["campus"], "majors": majors_for_college(session["college"]), "csrf": session["csrf"], "is_admin": bool(session.get("is_admin")), "submission": public_submission(row)})
     elif path == "/api/submit" and method == "POST":
         session, auth_error = require_session(environ)
         if auth_error:
