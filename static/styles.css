@@ -29,7 +29,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-button, input, textarea { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: wait; opacity: .55; }
 a { color: var(--blue); }
@@ -92,7 +92,7 @@ h2 { margin: 0 0 8px; font-size: 34px; font-weight: 600; line-height: 1.12; lett
 .lead { max-width: 610px; margin: 0 0 36px; color: var(--muted); font-size: 21px; font-weight: 400; line-height: 1.42; letter-spacing: 0; }
 .login-form { width: min(100%, 390px); display: grid; gap: 16px; text-align: left; }
 label { display: grid; gap: 8px; color: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: -0.224px; }
-input, textarea {
+input, select, textarea {
   width: 100%;
   color: var(--ink);
   background: var(--white);
@@ -102,11 +102,23 @@ input, textarea {
   padding: 13px 16px;
   transition: border-color .18s, box-shadow .18s, background .18s;
 }
-input { min-height: 48px; }
-input:focus, textarea:focus { border-color: var(--blue-focus); box-shadow: 0 0 0 3px rgba(0, 113, 227, .16); }
+input, select { min-height: 48px; }
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 44px;
+  background-color: var(--white);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='8' viewBox='0 0 14 8'%3E%3Cpath d='m1 1 6 6 6-6' fill='none' stroke='%236e6e73' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-position: right 16px center;
+  background-repeat: no-repeat;
+  background-size: 14px 8px;
+  cursor: pointer;
+}
+select:invalid { color: var(--muted); }
+input:focus, select:focus, textarea:focus { border-color: var(--blue-focus); box-shadow: 0 0 0 3px rgba(0, 113, 227, .16); }
 input[readonly] { color: var(--muted); background: var(--parchment); }
 textarea { min-height: 190px; resize: vertical; line-height: 1.55; }
-input::placeholder, textarea::placeholder { color: #86868b; }
+input::placeholder, select::placeholder, textarea::placeholder { color: #86868b; }
 .fine-print, .mobile-hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
 
 .pill-button {
